@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 
+
 Item {
   id: root
 
@@ -25,6 +26,11 @@ Item {
   property bool daemonUp: false
   property bool stateLoaded: false
   property real lastStateReadMs: 0
+
+  // Keybinds actually configured for wbv, scraped from the live niri config.
+  // niri has no IPC for binds, so the config tree is the only source of truth.
+  // [{ keys: "Super+Space", action: "dictate.toggle" }]
+  property var keybinds: []
 
   readonly property var cfg: pluginApi?.pluginSettings || ({})
   readonly property var defaults: pluginApi?.manifest?.metadata?.defaultSettings || ({})
@@ -167,6 +173,59 @@ Item {
     // one-shot CLI runner; stdout ignored
   }
 
+  // Scrape `wbv` binds out of the niri config so the panel shows what is really
+  // bound rather than what the docs assume. Read-only; failure just yields none.
+  // ponytail: grep+sed, not a KDL parser — these binds are one line each by design
+  Process {
+    id: keybindScan
+    command: ["sh", "-c", "grep -rhoE '^[[:space:]]*[A-Za-z0-9_+]+[[:space:]][^{]*\\{[[:space:]]*spawn(-sh)?[^}]*wbv[^}]*\\}' \"$HOME/.config/niri\" 2>/dev/null | sed -E 's/^[[:space:]]*([A-Za-z0-9_+]+).*wbv[[:space:]]+([a-z]+)[[:space:]]+([a-z]+).*/\\1\\t\\2.\\3/' | sed -E 's/^Mod\\+/Super+/; s/\\+ALT\\+/+Alt+/; s/\\+CTRL\\+/+Ctrl+/; s/\\+SHIFT\\+/+Shift+/' | sort -u"]
+    running: false
+
+    property var found: []
+
+    stdout: SplitParser {
+      onRead: line => {
+        var parts = String(line).split("\t");
+        if (parts.length === 2 && parts[0].trim() !== "")
+          keybindScan.found.push({
+            "keys": parts[0].trim(),
+            "action": parts[1].trim()
+          });
+      }
+    }
+
+    onExited: {
+      // shell sort -u orders by key name, which puts Meeting above Dictate.
+      // Present them in the order a user thinks about them instead.
+      var order = ["dictate.toggle", "dictate.start", "dictate.stop", "dictate.cancel", "meeting.toggle", "meeting.start", "meeting.stop"];
+      found.sort(function (a, b) {
+        var ia = order.indexOf(a.action);
+        var ib = order.indexOf(b.action);
+        if (ia < 0)
+          ia = order.length;
+        if (ib < 0)
+          ib = order.length;
+        return ia !== ib ? ia - ib : a.keys.localeCompare(b.keys);
+      });
+      root.keybinds = found;
+      found = [];
+    }
+  }
+
+  function refreshKeybinds() {
+    if (keybindScan.running)
+      return;
+    keybindScan.found = [];
+    keybindScan.running = true;
+  }
+
+  // Human label for an action id, e.g. "dictate.toggle" -> translated string.
+  function keybindLabel(action) {
+    var key = "keybind." + String(action).replace(".", "_");
+    var s = pluginApi?.tr(key);
+    return (s && s !== key) ? s : action;
+  }
+
   Process {
     id: openFolderProcess
   }
@@ -195,5 +254,6 @@ Item {
 
   Component.onCompleted: {
     Logger.i("waylandbettervoice", "Main loaded, watching", root.statePath);
+    refreshKeybinds();
   }
 }

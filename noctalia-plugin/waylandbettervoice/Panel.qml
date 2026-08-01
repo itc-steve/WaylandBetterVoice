@@ -13,9 +13,12 @@ Item {
   readonly property var geometryPlaceholder: panelContainer
   readonly property bool allowAttach: true
   property real contentPreferredWidth: 380 * Style.uiScaleRatio
-  property real contentPreferredHeight: 420 * Style.uiScaleRatio
+  // Grows with the number of shortcuts found, so the transcript box does not have to
+  // absorb the slack and shove the buttons to the bottom edge.
+  property real contentPreferredHeight: (398 + root.keybinds.length * 30) * Style.uiScaleRatio
 
   readonly property var main: pluginApi?.mainInstance
+  readonly property var keybinds: main?.keybinds ?? []
   readonly property string mode: main?.mode ?? "offline"
   readonly property string modelName: main?.modelName ?? "—"
   readonly property bool daemonUp: main?.daemonUp ?? false
@@ -129,6 +132,60 @@ Item {
               font.weight: Style.fontWeightSemiBold
             }
           }
+
+          // Shortcuts actually bound in the niri config, so the reminder can
+          // never drift from what the keyboard really does.
+          NDivider {
+            Layout.fillWidth: true
+            visible: root.keybinds.length > 0
+          }
+
+          Repeater {
+            model: root.keybinds
+
+            RowLayout {
+              required property var modelData
+              Layout.fillWidth: true
+              spacing: Style.marginS
+
+              NText {
+                text: root.main ? root.main.keybindLabel(modelData.action) : modelData.action
+                color: Color.mOnSurfaceVariant
+                pointSize: Style.fontSizeS
+              }
+              Item {
+                Layout.fillWidth: true
+              }
+              Rectangle {
+                // Keycap: monospace on a tinted chip reads as "press this".
+                Layout.preferredWidth: keyLabel.implicitWidth + Style.marginM * 2
+                Layout.preferredHeight: keyLabel.implicitHeight + Style.marginXS * 2
+                radius: Style.radiusS
+                color: Color.mSurfaceVariant
+                border.width: 1
+                border.color: Color.mOutline
+
+                NText {
+                  id: keyLabel
+                  anchors.centerIn: parent
+                  text: modelData.keys
+                  family: "monospace"
+                  color: Color.mOnSurface
+                  pointSize: Style.fontSizeXS
+                  font.weight: Style.fontWeightSemiBold
+                }
+              }
+            }
+          }
+
+          NText {
+            Layout.fillWidth: true
+            visible: root.keybinds.length === 0
+            text: pluginApi?.tr("panel.no_keybinds")
+            color: Color.mOnSurfaceVariant
+            pointSize: Style.fontSizeXS
+            wrapMode: Text.WordWrap
+          }
         }
       }
 
@@ -140,7 +197,9 @@ Item {
       NBox {
         Layout.fillWidth: true
         Layout.fillHeight: true
-        Layout.minimumHeight: 80 * Style.uiScaleRatio
+        Layout.minimumHeight: 72 * Style.uiScaleRatio
+        // Cap it: an empty transcript should not eat every spare pixel.
+        Layout.maximumHeight: 132 * Style.uiScaleRatio
 
         // Selectable multi-line transcript. No N* multi-line selectable widget.
         // ponytail: TextEdit for select/copy, swap if Noctalia adds NTextArea

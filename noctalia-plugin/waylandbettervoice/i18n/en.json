@@ -25,7 +25,8 @@
     "meeting_elapsed": "Elapsed",
     "open_meetings": "Open meetings folder",
     "error": "Error",
-    "no_error": "None"
+    "no_error": "None",
+    "no_keybinds": "No shortcuts found in your niri config. See packaging/niri-keybinds.kdl."
   },
   "settings": {
     "overlay_margin_label": "Overlay top margin",
@@ -47,5 +48,14 @@
     "transcribing": "transcribing",
     "meeting": "meeting",
     "error": "error"
+  },
+  "keybind": {
+    "dictate_toggle": "Dictate",
+    "dictate_start": "Start dictation",
+    "dictate_stop": "Stop dictation",
+    "dictate_cancel": "Cancel dictation",
+    "meeting_toggle": "Meeting",
+    "meeting_start": "Start meeting",
+    "meeting_stop": "Stop meeting"
   }
 }
