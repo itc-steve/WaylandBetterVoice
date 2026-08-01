@@ -38,6 +38,41 @@ def _client(cmd: str, args: dict | None = None) -> int:
     return 0
 
 
+def _cmd_model(args: argparse.Namespace) -> int:
+    """Local model ops — no daemon / IPC required."""
+    from waylandbettervoice import models as M
+    from waylandbettervoice.config import MODEL_DIR, mkdirs
+
+    if args.model_action == "path":
+        print(MODEL_DIR)
+        return 0
+
+    if args.model_action == "list":
+        mkdirs()
+        print(M.format_list())
+        return 0
+
+    if args.model_action == "download":
+        if not args.name:
+            print("usage: wbv model download <name>", file=sys.stderr)
+            print(f"known: {', '.join(m.name for m in M.KNOWN_MODELS)}", file=sys.stderr)
+            return 2
+        mkdirs()
+        try:
+            path = M.download(args.name)
+        except M.ModelError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("download cancelled", file=sys.stderr)
+            return 130
+        print(path)
+        return 0
+
+    print(f"unknown model action: {args.model_action}", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="wbv", description="WaylandBetterVoice dictation daemon")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -66,6 +101,14 @@ def main(argv: list[str] | None = None) -> int:
     p_status.add_argument("--json", action="store_true", help="raw JSON")
 
     sub.add_parser("quit", help="shut down daemon")
+
+    p_model = sub.add_parser("model", help="list / download whisper models (no daemon needed)")
+    p_model.add_argument(
+        "model_action",
+        choices=["list", "download", "path"],
+        help="list known models, download one, or print MODEL_DIR",
+    )
+    p_model.add_argument("name", nargs="?", help="model name for download (e.g. large-v3)")
 
     args = parser.parse_args(argv)
 
@@ -109,6 +152,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "quit":
         return _client("quit")
+
+    if args.command == "model":
+        return _cmd_model(args)
 
     parser.print_help()
     return 2

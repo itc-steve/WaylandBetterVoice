@@ -5,14 +5,21 @@ import json
 import os
 from pathlib import Path
 
-RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "waylandbettervoice"
+# Honour XDG_* when set; fall back to the usual user dirs.
+_XDG_RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+_XDG_DATA = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")
+_XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+
+RUNTIME_DIR = Path(_XDG_RUNTIME) / "waylandbettervoice"
 SOCKET_PATH = RUNTIME_DIR / "wbv.sock"
 STATE_PATH = RUNTIME_DIR / "state.json"
-DATA_DIR = Path.home() / ".local/share/waylandbettervoice"
+DATA_DIR = Path(_XDG_DATA) / "waylandbettervoice"
 MODEL_DIR = DATA_DIR / "models"
+SPEAKER_MODEL_DIR = MODEL_DIR / "speaker"
 MEETING_DIR = DATA_DIR / "meetings"
 LOG_PATH = DATA_DIR / "wbv.log"
-CONFIG_PATH = Path.home() / ".config/waylandbettervoice/config.json"
+CONFIG_DIR = Path(_XDG_CONFIG) / "waylandbettervoice"
+CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULTS: dict = {
     "model": "ggml-large-v3.bin",
@@ -42,8 +49,9 @@ def mkdirs() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    SPEAKER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     MEETING_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_config() -> dict:

@@ -275,6 +275,184 @@ def test_endpointer_flush_in_progress() -> None:
     print("  endpointer flush: ok")
 
 
+def test_known_models_table() -> None:
+    from waylandbettervoice.models import KNOWN_MODELS, resolve_known, short_name_for
+
+    names = {m.name for m in KNOWN_MODELS}
+    for required in ("tiny.en", "base.en", "small.en", "medium.en", "large-v3"):
+        assert required in names, f"missing {required} in KNOWN_MODELS"
+    for m in KNOWN_MODELS:
+        assert m.size > 0
+        assert m.filename.startswith("ggml-") and m.filename.endswith(".bin")
+        assert resolve_known(m.name).filename == m.filename
+        assert resolve_known(m.filename).name == m.name
+    assert short_name_for("ggml-large-v3.bin") == "large-v3"
+    print("  known models table: ok")
+
+
+def test_model_download_atomic_part() -> None:
+    """Fake download via local file:// — .part never left as final, atomic replace."""
+    import io
+    from waylandbettervoice import models as M
+
+    # tiny.en catalog entry — forge a body of exact expected size
+    m = M.resolve_known("tiny.en")
+    body = b"W" * m.size
+
+    with tempfile.TemporaryDirectory() as td:
+        src_dir = Path(td) / "src"
+        dest_dir = Path(td) / "dest"
+        src_dir.mkdir()
+        dest_dir.mkdir()
+        src = src_dir / m.filename
+        src.write_bytes(body)
+
+        class _Resp:
+            def __init__(self, data: bytes):
+                self._data = data
+                self._pos = 0
+                self.headers = {"Content-Length": str(len(data))}
+
+            def read(self, n: int = -1) -> bytes:
+                if self._pos >= len(self._data):
+                    return b""
+                if n < 0:
+                    chunk = self._data[self._pos :]
+                    self._pos = len(self._data)
+                    return chunk
+                chunk = self._data[self._pos : self._pos + n]
+                self._pos += len(chunk)
+                return chunk
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def opener(url: str):
+            assert m.filename in url
+            return _Resp(body)
+
+        sink = io.StringIO()
+        out = M.download(
+            "tiny.en",
+            directory=dest_dir,
+            base_url="file:///fake",
+            opener=opener,
+            progress_stream=sink,
+        )
+        assert out == dest_dir / m.filename
+        assert out.is_file()
+        assert out.stat().st_size == m.size
+        assert out.read_bytes() == body
+        # no leftover .part
+        assert not (dest_dir / (m.filename + ".part")).exists()
+        # second call skips (no overwrite)
+        out2 = M.download(
+            "tiny.en",
+            directory=dest_dir,
+            base_url="file:///fake",
+            opener=opener,
+            progress_stream=sink,
+        )
+        assert out2 == out
+
+        # interrupted mid-write leaves no final file and cleans .part
+        dest2 = Path(td) / "dest2"
+        dest2.mkdir()
+
+        class _BoomResp(_Resp):
+            def read(self, n: int = -1) -> bytes:
+                raise KeyboardInterrupt
+
+        try:
+            M.download(
+                "tiny.en",
+                directory=dest2,
+                base_url="file:///fake",
+                opener=lambda url: _BoomResp(body),
+                progress_stream=sink,
+            )
+            raise AssertionError("expected KeyboardInterrupt")
+        except KeyboardInterrupt:
+            pass
+        assert not (dest2 / m.filename).exists()
+        assert not (dest2 / (m.filename + ".part")).exists()
+    print("  model download atomic: ok")
+
+
+def test_xdg_path_resolution() -> None:
+    """DATA/CONFIG honour XDG_* env; runtime under XDG_RUNTIME_DIR."""
+    import importlib
+    import waylandbettervoice.config as cfg
+
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td)
+        data = base / "data"
+        conf = base / "conf"
+        run = base / "run"
+        env = {
+            "XDG_DATA_HOME": str(data),
+            "XDG_CONFIG_HOME": str(conf),
+            "XDG_RUNTIME_DIR": str(run),
+        }
+        old = {k: os.environ.get(k) for k in env}
+        try:
+            os.environ.update(env)
+            importlib.reload(cfg)
+            assert cfg.DATA_DIR == data / "waylandbettervoice"
+            assert cfg.MODEL_DIR == data / "waylandbettervoice" / "models"
+            assert cfg.CONFIG_PATH == conf / "waylandbettervoice" / "config.json"
+            assert cfg.RUNTIME_DIR == run / "waylandbettervoice"
+            assert cfg.SOCKET_PATH == run / "waylandbettervoice" / "wbv.sock"
+            assert cfg.LOG_PATH == data / "waylandbettervoice" / "wbv.log"
+            cfg.mkdirs()
+            assert cfg.MODEL_DIR.is_dir()
+            assert cfg.SPEAKER_MODEL_DIR.is_dir()
+            assert cfg.MEETING_DIR.is_dir()
+            assert cfg.CONFIG_DIR.is_dir()
+            assert cfg.RUNTIME_DIR.is_dir()
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            importlib.reload(cfg)
+    print("  xdg path resolution: ok")
+
+
+def test_model_missing_error_message() -> None:
+    """stt.resolve_model_path names the exact download command."""
+    import importlib
+    import waylandbettervoice.config as cfg
+    from waylandbettervoice import stt
+
+    with tempfile.TemporaryDirectory() as td:
+        data = Path(td) / "data"
+        old = os.environ.get("XDG_DATA_HOME")
+        try:
+            os.environ["XDG_DATA_HOME"] = str(data)
+            importlib.reload(cfg)
+            importlib.reload(stt)
+            try:
+                stt.resolve_model_path("ggml-large-v3.bin")
+                raise AssertionError("expected ModelMissingError")
+            except stt.ModelMissingError as e:
+                msg = str(e)
+                assert "wbv model download large-v3" in msg, msg
+                assert "ggml-large-v3.bin" in msg
+        finally:
+            if old is None:
+                os.environ.pop("XDG_DATA_HOME", None)
+            else:
+                os.environ["XDG_DATA_HOME"] = old
+            importlib.reload(cfg)
+            importlib.reload(stt)
+    print("  model missing error: ok")
+
+
 def main() -> int:
     print("waylandbettervoice selftest")
     tests = [
@@ -285,6 +463,10 @@ def main() -> int:
         test_endpointer_two_utterances,
         test_endpointer_short_blip_discarded,
         test_endpointer_flush_in_progress,
+        test_known_models_table,
+        test_model_download_atomic_part,
+        test_xdg_path_resolution,
+        test_model_missing_error_message,
     ]
     failed = 0
     for t in tests:

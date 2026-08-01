@@ -9,25 +9,26 @@ import numpy as np
 from pywhispercpp.model import Model
 
 from waylandbettervoice.config import LOG_PATH, MODEL_DIR
+from waylandbettervoice.models import short_name_for
 
 log = logging.getLogger("wbv.stt")
 
-VOCALINUX_MODEL_DIR = Path.home() / ".local/share/vocalinux/models/whispercpp"
+
+class ModelMissingError(FileNotFoundError):
+    """Raised when the configured ggml model is not on disk."""
 
 
 def resolve_model_path(name: str) -> Path:
-    """config model name inside MODEL_DIR, else vocalinux models dir."""
+    """Resolve config model name to a file under MODEL_DIR only."""
     primary = MODEL_DIR / name
     if primary.is_file():
         log.info("using model: %s", primary)
         return primary
-    fallback = VOCALINUX_MODEL_DIR / name
-    if fallback.is_file():
-        log.info("using model (vocalinux fallback): %s", fallback)
-        return fallback
-    # last resort: return primary path so Model raises a clear error
-    log.warning("model not found at %s or %s", primary, fallback)
-    return primary
+    short = short_name_for(name)
+    raise ModelMissingError(
+        f"model not found: {primary}\n"
+        f"Download it with: wbv model download {short}"
+    )
 
 
 def load_model(config: dict) -> Model:

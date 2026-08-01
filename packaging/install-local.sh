@@ -16,7 +16,6 @@ esac
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 plugin_source=/usr/share/waylandbettervoice/noctalia-plugin
 plugin_link="${HOME}/.config/noctalia/plugins/waylandbettervoice"
-model_source="${HOME}/.local/share/vocalinux/models/whispercpp"
 model_dir="${HOME}/.local/share/waylandbettervoice/models"
 niri_source=/usr/share/waylandbettervoice/niri-keybinds.kdl
 niri_snippet="${HOME}/.config/niri/cfg/waylandbettervoice.kdl"
@@ -29,7 +28,7 @@ if "${check}"; then
   announce "Would build package: (cd ${script_dir} && makepkg --cleanbuild --clean --force)"
   announce "Would install resulting waylandbettervoice package with: sudo pacman -U <package>"
   announce "Would create ${HOME}/.config/noctalia/plugins and symlink ${plugin_link} -> ${plugin_source}"
-  announce "Would symlink existing Whisper models from ${model_source} into ${model_dir}"
+  announce "Would create ${model_dir}; if empty, run: wbv model download large-v3"
   announce "Would create ${HOME}/.config/niri/cfg and copy ${niri_source} to ${niri_snippet} if absent"
   printf '%s\n' "Would not enable service or edit niri config."
   exit 0
@@ -61,23 +60,10 @@ else
   ln -s "${plugin_source}" "${plugin_link}"
 fi
 
-if [[ -d ${model_source} ]]; then
-  announce "Creating model directory: ${model_dir}"
-  mkdir -p "${model_dir}"
-  shopt -s nullglob
-  for model in "${model_source}"/*.bin; do
-    target="${model_dir}/$(basename "${model}")"
-    if [[ -L ${target} ]] && [[ $(readlink -f -- "${target}") == ${model} ]]; then
-      announce "Model link already correct: ${target}"
-    elif [[ -e ${target} || -L ${target} ]]; then
-      echo "Refusing to replace existing model path: ${target}" >&2
-    else
-      announce "Linking existing model: ${target} -> ${model}"
-      ln -s "${model}" "${target}"
-    fi
-  done
-else
-  announce "No existing Vocalinux model directory found; skipping model links"
+announce "Creating model directory: ${model_dir}"
+mkdir -p "${model_dir}"
+if [[ -z $(find "${model_dir}" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+  printf '%s\n' "No model found. Run: wbv model download large-v3"
 fi
 
 if [[ -e ${niri_snippet} || -L ${niri_snippet} ]]; then
@@ -92,6 +78,7 @@ fi
 cat <<'EOF'
 
 Next steps (not performed):
+  wbv model download large-v3
   systemctl --user enable --now waylandbettervoice.service
   Add: include "./cfg/waylandbettervoice.kdl"
   to ~/.config/niri/config.kdl, then reload niri.

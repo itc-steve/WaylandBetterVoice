@@ -18,7 +18,7 @@
 | Leaks | 20× `dictate start→cancel`, 20× `start→stop`; FD/task counts via `/proc/<pid>/fd` and `/task` |
 | Concurrency | Parallel `dictate toggle`×2, `dictate start`×3; meeting during dictate; dictate during meeting; SIGTERM mid-meeting; dual `Transcribing` → core dump |
 | Failure UX | `kill -KILL` daemon; garbage `state.json`; config `model=DOES_NOT_EXIST.bin` + restart; `wbv quit` mid-flow |
-| Packaging | `pacman -Qi` / file-list intersection with vocalinux; pin of `python-pywhispercpp-cuda` |
+| Packaging | `pacman -Qi` / file-list conflict check; pin of `python-pywhispercpp-cuda` |
 
 ---
 
@@ -220,7 +220,7 @@ Restart=on-failure
 ```
 
 `systemctl --user show waylandbettervoice` → `After=pipewire.service basic.target ...` only.  
-`graphical-session.target` **Wants** wbv and is ordered **Before** `app-easyeffects\x2dservice@autostart.service` and `app-vocalinux@autostart.service`. So on a cold graphical start, **wbv becomes active before EasyEffects recreates `easyeffects_source`**.
+`graphical-session.target` **Wants** wbv and is ordered **Before** `app-easyeffects\x2dservice@autostart.service`. So on a cold graphical start, **wbv becomes active before EasyEffects recreates `easyeffects_source`**.
 
 First capture uses `pactl get-default-source` → today `easyeffects_source`. If user hotkeys dictate in the first seconds after login, `pw-record --target easyeffects_source` can fail or bind wrong.
 
@@ -262,7 +262,7 @@ Plus **code** retry on capture start (3× backoff) when target node missing — 
 
 ```bash
 # config model=DOES_NOT_EXIST.bin; systemctl --user restart waylandbettervoice
-WARNING wbv.stt: model not found at .../DOES_NOT_EXIST.bin or vocalinux fallback
+WARNING wbv.stt: model not found at .../DOES_NOT_EXIST.bin
 ERROR pywhispercpp.utils: Invalid model name `.../DOES_NOT_EXIST.bin`, available models are: [...]
 INFO wbv.stt: model loaded
 # status → model_loaded: true, mode idle, model DOES_NOT_EXIST.bin
@@ -343,17 +343,16 @@ Often survives (PipeWire node reappears with same name). Can still pair with F3 
 
 ---
 
-### F10 — LOW — Packaging / vocalinux coexistence
+### F10 — LOW — Packaging isolation
 
 | Check | Result |
 |---|---|
-| `python-pywhispercpp-cuda 1.4.0-11` | Intact; `Provides: python-pywhispercpp`; required by both vocalinux + wbv |
+| `python-pywhispercpp-cuda 1.4.0-11` | Intact; `Provides: python-pywhispercpp`; required by wbv |
 | File collisions (files only) | **None** |
 | `Conflicts`/`Replaces` on wbv | None (correct) |
-| vocalinux autostart | Still `app-vocalinux@autostart.service` **active** |
 | Simultaneous mic grab | No evidence of hard device lock fight in this session; both can open PW streams. UX confusion (two STT stacks) is user-level, not a packaging bug |
 
-**Fine:** models are symlinks into vocalinux’s tree; no second download.
+**Fine:** no duplicate model downloads.
 
 ---
 
@@ -375,7 +374,7 @@ Often survives (PipeWire node reappears with same name). Can still pair with F3 
 | Corrupt `state.json` while daemon up | Daemon unaffected; next state write repairs file |
 | SIGKILL daemon | `Restart=on-failure` brings unit back; model reload ~0.4–1 s |
 | Model cold load with large-v3 CUDA | Success; VRAM resident; no start-timeout issue (`Type=simple`) |
-| Package pins / no vocalinux file clash | OK |
+| Package pins / no file clashes | OK |
 | Default sink/source restored after tests | MV6 sink + `easyeffects_source` |
 | EasyEffects still running after restart test | PID present, service-mode |
 
@@ -394,7 +393,7 @@ Often survives (PipeWire node reappears with same name). Can still pair with F3 
 | F7 | **medium** | Stale/garbage `state.json` window for plugin |
 | F8 | **low** | Sink switch mid-session |
 | F9 | **low** | EasyEffects restart usually OK |
-| F10 | **low** | vocalinux coexists (no file fight) |
+| F10 | **low** | packaging isolated (no file conflicts) |
 | F11 | **low** | CLI reload missing; 5 s IPC timeout |
 
 ---
@@ -420,7 +419,6 @@ default sink: alsa_output.usb-Shure_Inc_Shure_MV6_...
 default source: easyeffects_source
 pw-record: none
 easyeffects: running (--service-mode)
-vocalinux: still installed + autostart active
 python-pywhispercpp-cuda: 1.4.0-11 intact
 ```
 

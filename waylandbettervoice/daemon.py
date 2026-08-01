@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import queue
 import shutil
 import signal
@@ -42,7 +43,10 @@ def _setup_logging() -> None:
     if not root.handlers:
         root.setLevel(logging.INFO)
         fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        fh = logging.FileHandler(LOG_PATH, encoding="utf-8")
+        # cap log growth: 5 × 2 MiB rotated files under DATA_DIR
+        fh = logging.handlers.RotatingFileHandler(
+            LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=4, encoding="utf-8"
+        )
         fh.setFormatter(fmt)
         root.addHandler(fh)
         sh = logging.StreamHandler(sys.stderr)
@@ -235,7 +239,16 @@ def dictate_start(_args: dict | None = None) -> dict:
         if mode == "meeting":
             return {"ok": False, "error": "meeting active — stop meeting first"}
         if _model is None:
-            return {"ok": False, "error": "model not loaded"}
+            from waylandbettervoice.models import short_name_for
+
+            want = _config.get("model", "ggml-large-v3.bin")
+            return {
+                "ok": False,
+                "error": (
+                    f"model not loaded ({want}). "
+                    f"Run: wbv model download {short_name_for(want)}"
+                ),
+            }
 
         ep = _make_endpointer()
         try:
@@ -439,6 +452,13 @@ def run(foreground: bool = True) -> int:
     try:
         _model = stt.load_model(_config)
         state.write_state(model_loaded=True)
+    except stt.ModelMissingError as e:
+        # actionable — no silent auto-download (a multi-GB surprise is hostile)
+        msg = str(e)
+        log.error("%s", msg)
+        state.write_state(model_loaded=False, mode="error", error=msg)
+        _notify(msg.splitlines()[0])
+        _model = None
     except Exception as e:  # noqa: BLE001
         log.exception("model load failed")
         state.write_state(model_loaded=False, mode="error", error=f"model load failed: {e}")

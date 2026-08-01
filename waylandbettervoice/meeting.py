@@ -81,7 +81,9 @@ class _Diarizer:
         self._centroids: list[np.ndarray] = []
         self._fixed_count = max(0, int(_value(settings, "meeting_speakers", 0)))
         self._warned = False
-        model_dir = Path.home() / ".local/share/waylandbettervoice/models/speaker"
+        from waylandbettervoice.config import SPEAKER_MODEL_DIR
+
+        model_dir = SPEAKER_MODEL_DIR
         model = next(iter(sorted(model_dir.rglob("*.onnx"))), None)
         if not _value(settings, "meeting_diarization", True) or model is None:
             self._warn("speaker diarization unavailable; system segments use Speaker ?")

@@ -62,15 +62,19 @@ cd WaylandBetterVoice/packaging
 Then:
 
 ```bash
-# 1. daemon — loads the model into VRAM at session start
+# 1. get a model (~2.9 GB for large-v3; small.en is 465 MB and much faster)
+wbv model list
+wbv model download large-v3
+
+# 2. daemon — loads the model into VRAM at session start
 systemctl --user enable --now waylandbettervoice.service
 
-# 2. keybinds — the installer copies the snippet but never edits your config
+# 3. keybinds — the installer copies the snippet but never edits your config
 #    add this line to ~/.config/niri/config.kdl yourself:
 #      include "./cfg/waylandbettervoice.kdl"
 niri validate
 
-# 3. overlay (optional, needs Noctalia)
+# 4. overlay (optional, needs Noctalia)
 ln -s /usr/share/waylandbettervoice/noctalia-plugin \
       ~/.config/noctalia/plugins/waylandbettervoice
 ```
@@ -78,8 +82,8 @@ ln -s /usr/share/waylandbettervoice/noctalia-plugin \
 Enable the plugin in Noctalia's settings, then add the **WaylandBetterVoice** widget to
 your bar.
 
-The installer symlinks any existing whisper models it finds rather than re-downloading
-them, and refuses to run as root.
+The installer is idempotent and refuses to run as root. Models are downloaded on demand
+into `~/.local/share/waylandbettervoice/models/` — nothing is fetched without you asking.
 
 ## Use
 
@@ -95,6 +99,8 @@ Everything is also available on the CLI and from the bar widget:
 wbv dictate toggle      # or start / stop / cancel
 wbv meeting toggle      # or start / stop
 wbv status --json
+wbv model list          # what is downloaded, what is available
+wbv model download <name>
 ```
 
 ### Dictation
@@ -271,13 +277,14 @@ The machine-specific pieces, in the order you will hit them:
 
 Nothing else is hardware-specific.
 
-## Related work
+## Built on
 
-Built after using [vocalinux](https://github.com/jatinkrmalik/vocalinux), which
-established that offline dictation on Linux is worth having. The overlay takes its
-spirit from [thinking-orbs](https://github.com/Jakubantalik/thinking-orbs), and meeting
-transcription was inspired by [quill](https://github.com/digimata/quill). All code here
-is original.
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) via
+  [pywhispercpp](https://github.com/Absadiki/pywhispercpp) — transcription
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — optional speaker embeddings
+- [PipeWire](https://pipewire.org), [wtype](https://github.com/atx/wtype),
+  [niri](https://github.com/YaLTeR/niri), and
+  [Noctalia](https://github.com/noctalia-dev/noctalia-shell)
 
 ## License
 
