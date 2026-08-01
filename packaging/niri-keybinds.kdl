@@ -1,6 +1,14 @@
-// Add `include "./cfg/waylandbettervoice.kdl"` to your niri config yourself.
-// Installer never edits your niri configuration.
+// WaylandBetterVoice keybinds.
+//
+// Add this to your niri config yourself — the installer never edits it:
+//     include "./cfg/waylandbettervoice.kdl"
+// Then check with `niri validate` before reloading.
+//
+// Super+Space is chosen because it is hit blind with two thumbs while you are
+// already talking, and because dictation on other platforms uses the same key.
+// repeat=false stops key-repeat from firing the toggle many times on a long press.
 binds {
-    Mod+ALT+D hotkey-overlay-title="WaylandBetterVoice: Dictate" { spawn-sh "wbv dictate toggle"; }
-    Mod+ALT+M hotkey-overlay-title="WaylandBetterVoice: Meeting" { spawn-sh "wbv meeting toggle"; }
+    Mod+Space       repeat=false hotkey-overlay-title="Dictate: start/stop listening" { spawn-sh "wbv dictate toggle"; }
+    Mod+ALT+Space   repeat=false hotkey-overlay-title="Meeting: start/stop recording" { spawn-sh "wbv meeting toggle"; }
+    Mod+ALT+X       repeat=false hotkey-overlay-title="Dictate: cancel without typing" { spawn-sh "wbv dictate cancel"; }
 }

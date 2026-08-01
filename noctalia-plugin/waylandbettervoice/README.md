@@ -31,7 +31,7 @@ Folder name **must** match `manifest.json` `id` (`waylandbettervoice`).
 1. Start the daemon: `wbv daemon` (or the user systemd unit).
 2. Open Noctalia settings → Plugins → enable **WaylandBetterVoice**.
 3. Add the bar widget from the bar editor (mic icon).
-4. Optional: niri binds `Mod+Alt+D` / `Mod+Alt+M` (see packaging `niri-keybinds.kdl`).
+4. Optional: niri binds `Super+Space` (dictate) / `Super+Alt+Space` (meeting) — see packaging `niri-keybinds.kdl`.
 
 ## Load check
 

@@ -3,7 +3,7 @@
 ## Data flow
 
 ```
-niri keybind (Mod+Alt+D/M)
+niri keybind (Super+Space / Super+Alt+Space)
   │
   ▼
 wbv CLI  ── unix socket (XDG_RUNTIME_DIR/waylandbettervoice/wbv.sock) ──►  daemon

@@ -1,6 +1,6 @@
 # Meetings
 
-`wbv meeting toggle` (Mod+Alt+M) records two 16 kHz mono streams at once:
+`wbv meeting toggle` (`Super+Alt+Space`) records two 16 kHz mono streams at once:
 
 - **Microphone** — the default PipeWire source. Always labeled `Me`.
 - **System audio** — the sink that is actually playing (see below). This is the one

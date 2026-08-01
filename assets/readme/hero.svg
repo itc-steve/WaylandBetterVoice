@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="380" viewBox="0 0 1200 380"
+     role="img" aria-labelledby="title desc">
+  <title id="title">WaylandBetterVoice</title>
+  <desc id="desc">Local GPU voice dictation for niri on Wayland. Press Super plus Space, speak, and each sentence is typed into the focused window when you pause. Shows the pipeline from keybind to captured audio to whisper large-v3 resident in VRAM to typed text.</desc>
+
+  <rect width="1200" height="380" rx="26" fill="#121316"/>
+  <rect x="0.5" y="0.5" width="1199" height="379" rx="26" fill="none" stroke="#44474f" stroke-width="1"/>
+
+  <!-- title block -->
+  <g id="title-block" transform="translate(64 74)">
+    <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="18" letter-spacing="3" fill="#adc6ff">LOCAL · GPU · WAYLAND</text>
+
+    <text x="0" y="66" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="58" font-weight="700" fill="#e3e2e6">WaylandBetterVoice</text>
+
+    <text x="0" y="116" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#c4c6d0">Hold no keys. Speak in sentences.</text>
+    <text x="0" y="148" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#c4c6d0">Each pause types what you just said.</text>
+
+    <!-- keycaps -->
+    <g transform="translate(0 186)">
+      <rect x="0" y="0" width="86" height="38" rx="8" fill="#1f1f23" stroke="#44474f"/>
+      <text x="43" y="25" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="18" fill="#e3e2e6">Super</text>
+      <text x="99" y="25" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="18" fill="#44474f">+</text>
+      <rect x="120" y="0" width="104" height="38" rx="8" fill="#1f1f23" stroke="#44474f"/>
+      <text x="172" y="25" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="18" fill="#e3e2e6">Space</text>
+      <text x="244" y="25" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="18" fill="#c4c6d0">toggles listening</text>
+    </g>
+  </g>
+
+  <!-- pipeline proof -->
+  <g id="project-proof" transform="translate(676 66)">
+    <rect x="0" y="0" width="460" height="248" rx="16" fill="#1f1f23" stroke="#44474f"/>
+
+    <text x="24" y="34" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="16" letter-spacing="2" fill="#c4c6d0">PIPELINE</text>
+
+    <!-- step 1 -->
+    <g transform="translate(24 58)">
+      <circle cx="8" cy="8" r="8" fill="#adc6ff"/>
+      <text x="30" y="14" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#e3e2e6">niri keybind</text>
+      <text x="30" y="38" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="17" fill="#c4c6d0">wbv dictate toggle</text>
+    </g>
+    <path d="M32 116 L32 132" stroke="#44474f" stroke-width="2"/>
+
+    <!-- step 2 -->
+    <g transform="translate(24 128)">
+      <circle cx="8" cy="8" r="8" fill="#bfc6dc"/>
+      <text x="30" y="14" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#e3e2e6">pause detected</text>
+      <text x="30" y="38" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="17" fill="#c4c6d0">whisper large-v3 · in VRAM</text>
+    </g>
+    <path d="M32 186 L32 202" stroke="#44474f" stroke-width="2"/>
+
+    <!-- step 3 -->
+    <g transform="translate(24 198)">
+      <circle cx="8" cy="8" r="8" fill="#debcdf"/>
+      <text x="30" y="14" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="20" fill="#e3e2e6">typed where you point</text>
+    </g>
+  </g>
+
+  <!-- footer metadata -->
+  <g id="meta" transform="translate(64 330)">
+    <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#44474f">nothing leaves the machine</text>
+    <text x="290" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#44474f">·</text>
+    <text x="316" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#44474f">english only</text>
+    <text x="466" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#44474f">·</text>
+    <text x="492" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="17" fill="#44474f">RTX PRO 6000 Blackwell · sm_120</text>
+  </g>
+</svg>
