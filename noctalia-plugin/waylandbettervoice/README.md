@@ -20,7 +20,7 @@ Packaging installs the plugin tree to:
 Manual (dev) symlink from the repo:
 
 ```bash
-ln -sfn /home/sdane/Projects/WaylandBetterVoice/noctalia-plugin/waylandbettervoice \
+ln -sfn "$PWD/noctalia-plugin/waylandbettervoice" \
   ~/.config/noctalia/plugins/waylandbettervoice
 ```
 
