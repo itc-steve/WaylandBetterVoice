@@ -59,7 +59,7 @@ def _cmd_model(args: argparse.Namespace) -> int:
             return 2
         mkdirs()
         try:
-            path = M.download(args.name)
+            path = M.download(args.name, token=getattr(args, "token", None))
         except M.ModelError as e:
             print(str(e), file=sys.stderr)
             return 1
@@ -109,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         help="list known models, download one, or print MODEL_DIR",
     )
     p_model.add_argument("name", nargs="?", help="model name for download (e.g. large-v3)")
+    p_model.add_argument(
+        "--token",
+        metavar="HF_TOKEN",
+        help="optional Hugging Face token. Not needed for the default models; "
+        "useful for rate limits or gated repos. Falls back to HF_TOKEN, "
+        "HUGGING_FACE_HUB_TOKEN, then ~/.cache/huggingface/token",
+    )
 
     args = parser.parse_args(argv)
 

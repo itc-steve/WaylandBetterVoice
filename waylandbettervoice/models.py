@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,70 @@ from waylandbettervoice.config import MODEL_DIR, mkdirs
 
 # Upstream: https://huggingface.co/ggerganov/whisper.cpp
 _HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+# Host the Authorization header may be sent to. HF answers a model request with a
+# redirect to a CDN (cdn-lfs*.hf.co / cloudfront), and urllib would happily replay
+# the header to whatever host it lands on. The token is a credential, so it goes to
+# huggingface.co and nowhere else.
+_TOKEN_HOST = "huggingface.co"
+
+
+def read_token(explicit: str | None = None) -> str | None:
+    """Resolve an optional Hugging Face token.
+
+    Order: explicit argument, then HF_TOKEN / HUGGING_FACE_HUB_TOKEN, then the file
+    the huggingface-cli writes (~/.cache/huggingface/token). Returns None when there
+    is none — the whisper.cpp models are public and download fine anonymously.
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    for var in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        val = os.environ.get(var)
+        if val and val.strip():
+            return val.strip()
+    # Same location huggingface-cli login uses, so an existing login just works.
+    cache = os.environ.get("HF_HOME") or str(Path.home() / ".cache/huggingface")
+    token_file = Path(cache) / "token"
+    try:
+        if token_file.is_file():
+            val = token_file.read_text(encoding="utf-8").strip()
+            if val:
+                return val
+    except OSError:
+        pass
+    return None
+
+
+class _TokenSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Strip Authorization when a redirect leaves the token host.
+
+    Without this, an HF download that redirects to a CDN would forward the user's
+    token to that third party.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        if urllib.parse.urlsplit(newurl).hostname != _TOKEN_HOST:
+            for key in list(new.headers):
+                if key.lower() == "authorization":
+                    del new.headers[key]
+            new.unredirected_hdrs.pop("Authorization", None)
+        return new
+
+
+def _build_opener(token: str | None):
+    """urlopen-compatible callable that attaches the token only to the HF host."""
+    opener = urllib.request.build_opener(_TokenSafeRedirectHandler)
+
+    def _open(url):
+        req = urllib.request.Request(url)
+        if token and urllib.parse.urlsplit(url).hostname == _TOKEN_HOST:
+            req.add_header("Authorization", f"Bearer {token}")
+        return opener.open(req)
+
+    return _open
 
 # Sizes from Hugging Face Content-Length (verified 2026-08).
 # ponytail: size-only verify; HF has no cheap stable SHA endpoint for these bins
@@ -147,6 +212,7 @@ def download(
     base_url: str | None = None,
     opener=None,
     progress_stream=None,
+    token: str | None = None,
 ) -> Path:
     """Download a known model into directory (default MODEL_DIR).
 
@@ -170,7 +236,8 @@ def download(
         )
 
     url = f"{(base_url or _HF_BASE).rstrip('/')}/{m.filename}"
-    open_url = opener or urllib.request.urlopen
+    resolved_token = read_token(token)
+    open_url = opener or _build_opener(resolved_token)
     err_stream = progress_stream if progress_stream is not None else sys.stderr
 
     try:
@@ -181,9 +248,22 @@ def download(
                 pass
 
         _prog(err_stream, f"downloading {m.filename} ({m.label}) from {url}\n")
+        if resolved_token:
+            _prog(err_stream, "using Hugging Face token\n")
         try:
             resp = open_url(url)  # noqa: S310 — fixed HF URL / test file://
         except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise ModelError(
+                    f"HTTP {e.code} fetching {url}: {e.reason}. "
+                    "This model needs a Hugging Face token with access to it — pass "
+                    "--token, set HF_TOKEN, or run: huggingface-cli login"
+                ) from e
+            if e.code == 429:
+                raise ModelError(
+                    f"HTTP 429 (rate limited) fetching {url}. Retry later, or use a "
+                    "Hugging Face token (--token / HF_TOKEN) for a higher limit."
+                ) from e
             raise ModelError(f"HTTP {e.code} fetching {url}: {e.reason}") from e
         except urllib.error.URLError as e:
             raise ModelError(f"network error fetching {url}: {e.reason}") from e

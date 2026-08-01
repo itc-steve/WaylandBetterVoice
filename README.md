@@ -103,6 +103,18 @@ wbv model list          # what is downloaded, what is available
 wbv model download <name>
 ```
 
+Models come from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
+on Hugging Face and are public, so no account is needed. If you hit a rate limit or want
+to point the downloader at a gated repo, pass a token:
+
+```bash
+wbv model download large-v3 --token hf_xxx
+# or export HF_TOKEN=hf_xxx, or just run: huggingface-cli login
+```
+
+The token is only ever sent to `huggingface.co` — it is stripped before following the
+redirect to the CDN that actually serves the file.
+
 ### Dictation
 
 Listening mode is continuous. You are not holding a key and you are not pressing stop

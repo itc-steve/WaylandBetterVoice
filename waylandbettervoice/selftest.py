@@ -453,6 +453,76 @@ def test_model_missing_error_message() -> None:
     print("  model missing error: ok")
 
 
+
+def test_hf_token_resolution_order() -> None:
+    """explicit arg > HF_TOKEN > HUGGING_FACE_HUB_TOKEN > cli login token file."""
+    import tempfile
+    from waylandbettervoice import models as M
+
+    saved = {k: os.environ.get(k) for k in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HOME")}
+    try:
+        for k in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+            os.environ.pop(k, None)
+        home = tempfile.mkdtemp()
+        os.environ["HF_HOME"] = home
+
+        assert M.read_token() is None, "no token anywhere should give None"
+        assert M.read_token("  ") is None, "whitespace-only token must be ignored"
+        assert M.read_token("explicit") == "explicit"
+
+        os.environ["HF_TOKEN"] = "env"
+        assert M.read_token() == "env"
+        assert M.read_token("explicit") == "explicit", "explicit must beat env"
+
+        del os.environ["HF_TOKEN"]
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = "hub"
+        assert M.read_token() == "hub"
+
+        del os.environ["HUGGING_FACE_HUB_TOKEN"]
+        Path(home, "token").write_text("fromfile\n", encoding="utf-8")
+        assert M.read_token() == "fromfile", "should read huggingface-cli token file"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("  hf token resolution order: ok")
+
+
+def test_hf_token_not_leaked_on_redirect() -> None:
+    """HF redirects downloads to a CDN; the token must not follow it there."""
+    import urllib.request
+    from waylandbettervoice import models as M
+
+    handler = M._TokenSafeRedirectHandler()
+    req = urllib.request.Request("https://huggingface.co/r/resolve/main/f.bin")
+    req.add_header("Authorization", "Bearer SECRET")
+
+    class _FP:
+        def read(self, *a):
+            return b""
+
+        def close(self):
+            pass
+
+    def auth_of(r):
+        if r is None:
+            return None
+        return {k.lower(): v for k, v in r.headers.items()}.get("authorization")
+
+    same = handler.redirect_request(req, _FP(), 302, "Found", {}, "https://huggingface.co/other.bin")
+    assert auth_of(same) == "Bearer SECRET", "token should survive same-host redirect"
+
+    for foreign in (
+        "https://cdn-lfs-us-1.hf.co/repos/a/b.bin",
+        "https://evil.example.com/steal",
+    ):
+        away = handler.redirect_request(req, _FP(), 302, "Found", {}, foreign)
+        assert auth_of(away) is None, f"token leaked to {foreign}"
+    print("  hf token not leaked on redirect: ok")
+
+
 def main() -> int:
     print("waylandbettervoice selftest")
     tests = [
@@ -467,6 +537,8 @@ def main() -> int:
         test_model_download_atomic_part,
         test_xdg_path_resolution,
         test_model_missing_error_message,
+        test_hf_token_resolution_order,
+        test_hf_token_not_leaked_on_redirect,
     ]
     failed = 0
     for t in tests:
