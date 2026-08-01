@@ -1,11 +1,15 @@
 import QtQuick
-import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 
-// Overlay window: glowing thinking-orbs while listening/dictating/transcribing,
-// discreet pill while meeting.
+// Overlay window: a compact status capsule while listening/dictating/transcribing,
+// a discreet pill while recording a meeting.
+//
+// Design notes: the first version floated three large blurred circles directly over
+// the desktop. Over text it read as random bokeh — no shape, no edge, unclear what it
+// meant. This version keeps everything inside one small dark capsule with a defined
+// border, so it reads as a deliberate UI element instead of a rendering artifact.
 PanelWindow {
   id: root
 
@@ -13,26 +17,27 @@ PanelWindow {
   property var main: pluginApi?.mainInstance
   readonly property string mode: main?.mode ?? "offline"
   readonly property real level: main?.level ?? 0.0
-  readonly property var meeting: main?.meeting ?? ({ "elapsed": 0 })
+  readonly property var meeting: main?.meeting ?? ({
+                                                     "elapsed": 0
+                                                   })
   readonly property real overlayTopMargin: main?.overlayTopMargin ?? 46
   readonly property real orbScale: main?.orbScale ?? 1.0
   readonly property bool showOrbs: main?.showOrbs ?? false
   readonly property bool showMeetingPill: main?.showMeetingPill ?? false
 
-  readonly property real baseW: 180 * orbScale
-  readonly property real baseH: 60 * orbScale
+  // Compact capsule. Small enough to ignore, big enough to read at a glance.
+  readonly property real capsuleW: Math.round(132 * orbScale)
+  readonly property real capsuleH: Math.round(34 * orbScale)
   readonly property real pillW: 110
   readonly property real pillH: 26
-  readonly property real contentW: showMeetingPill ? pillW : baseW
-  readonly property real contentH: showMeetingPill ? pillH : baseH
 
   anchors.top: true
   anchors.left: false
   anchors.right: false
   anchors.bottom: false
   margins.top: overlayTopMargin
-  implicitWidth: Math.round(contentW)
-  implicitHeight: Math.round(contentH)
+  implicitWidth: Math.round(showMeetingPill ? pillW : capsuleW)
+  implicitHeight: Math.round(showMeetingPill ? pillH : capsuleH)
   color: "transparent"
   visible: showOrbs || showMeetingPill
 
@@ -42,93 +47,123 @@ PanelWindow {
   exclusionMode: ExclusionMode.Ignore
   focusable: false
 
-  Item {
-    id: orbCluster
-    anchors.fill: parent
+  // ---- Dictation capsule ----
+  Rectangle {
+    id: capsule
+    anchors.centerIn: parent
+    width: root.capsuleW
+    height: root.capsuleH
     visible: root.showOrbs
-    opacity: root.mode === "listening" ? 0.48 : root.mode === "transcribing" ? 0.7 : 1.0
-    property real responseLevel: Math.min(1.0, Math.max(0.0, root.level))
-    readonly property real pulse: root.mode === "dictating" ? 0.92 + 0.28 * responseLevel : root.mode === "listening" ? 0.72 : 0.84
+    radius: height / 2
+    // Solid dark backing: the dots must never sit directly on top of body text.
+    color: Qt.alpha(Color.mSurface, 0.92)
+    border.width: 1
+    border.color: Qt.alpha(accentColor, root.mode === "listening" ? 0.35 : 0.55)
 
-    // Fast attack, slow release keeps speech response lively without jitter.
+    readonly property color accentColor: {
+      if (root.mode === "transcribing")
+        return Color.mTertiary;
+      if (root.mode === "dictating")
+        return Color.mPrimary;
+      return Color.mSecondary;      // listening
+    }
+
+    // Smoothed level: fast attack so speech feels responsive, slow release so it
+    // does not flicker between syllables.
+    property real responseLevel: root.mode === "dictating" ? Math.min(1.0, Math.max(0.0, root.level)) : 0.0
     Behavior on responseLevel {
       NumberAnimation {
-        duration: root.level > orbCluster.responseLevel ? 110 : 480
-        easing.type: root.level > orbCluster.responseLevel ? Easing.OutCubic : Easing.InOutSine
+        duration: 90
+        easing.type: Easing.OutQuad
       }
     }
 
-    Repeater {
-      model: 3
+    opacity: 0.0
+    Component.onCompleted: opacity = 1.0
+    Behavior on opacity {
+      NumberAnimation {
+        duration: 140
+        easing.type: Easing.OutQuad
+      }
+    }
 
-      Item {
-        id: orb
-        required property int index
-        property real phase: index * 120
-        readonly property real angle: phase * Math.PI / 180
-        readonly property real orbitR: root.baseW * (root.mode === "listening" ? 0.15 : root.mode === "transcribing" ? 0.18 : 0.22) * (1.0 + 0.08 * Math.sin(angle * 1.7 + index))
-        readonly property real size: root.baseH * (root.mode === "listening" ? 0.46 : 0.7) * orbCluster.pulse * (index === 0 ? 1.0 : index === 1 ? 0.86 : 0.72)
-        readonly property color coreColor: {
-          if (root.mode === "transcribing")
-            return index === 0 ? Color.mSecondary : index === 1 ? Color.mTertiary : Color.mPrimary;
-          return index === 0 ? Color.mPrimary : index === 1 ? Color.mSecondary : Color.mTertiary;
-        }
+    Row {
+      anchors.centerIn: parent
+      spacing: Math.round(7 * root.orbScale)
 
-        x: root.baseW / 2 + Math.cos(angle) * orbitR - width / 2
-        y: root.baseH / 2 + Math.sin(angle) * orbitR * 0.55 - height / 2
-        width: size
-        height: size
-
-        NumberAnimation on phase {
-          from: index * 120
-          to: index * 120 + 360
-          duration: root.mode === "listening" ? 18000 + index * 1700 : root.mode === "transcribing" ? 14000 + index * 1300 : 7200 + index * 900
-          loops: Animation.Infinite
-          running: orbCluster.visible
-        }
+      // Three dots. Small, sharp, on a baseline — a recognizable "thinking" motif.
+      Repeater {
+        model: 3
 
         Item {
-          id: orbArt
-          anchors.fill: parent
-          Rectangle {
-            anchors.centerIn: parent
-            width: parent.width * 1.28
-            height: parent.height * 1.28
-            radius: width / 2
-            color: Qt.alpha(orb.coreColor, root.mode === "listening" ? 0.12 : 0.2)
-          }
-          Rectangle {
-            anchors.centerIn: parent
-            width: parent.width
-            height: parent.height
-            radius: width / 2
-            color: Qt.alpha(orb.coreColor, root.mode === "transcribing" ? 0.4 : 0.58)
-          }
-          Rectangle {
-            anchors.centerIn: parent
-            width: parent.width * 0.62
-            height: parent.height * 0.62
-            radius: width / 2
-            color: Qt.alpha(orb.coreColor, root.mode === "listening" ? 0.52 : 0.9)
-          }
-        }
+          id: cell
+          required property int index
 
-        // Installed Qt 6.5+ MultiEffect gives layered circles a real soft halo.
-        MultiEffect {
-          anchors.centerIn: parent
-          width: orbArt.width * 1.8
-          height: orbArt.height * 1.8
-          source: orbArt
-          blurEnabled: true
-          blur: 0.72
-          blurMax: 32
-          opacity: root.mode === "listening" ? 0.36 : root.mode === "transcribing" ? 0.52 : 0.76
-          z: -1
+          readonly property real baseSize: Math.round(7 * root.orbScale)
+          // In dictating mode each dot also responds to mic level, staggered so the
+          // group ripples instead of pulsing as one block.
+          readonly property real levelBoost: capsule.responseLevel * (index === 1 ? 1.0 : 0.7)
+
+          width: baseSize * 2.0
+          height: baseSize * 2.0
+          anchors.verticalCenter: parent.verticalCenter
+
+          // Soft halo, drawn as a real circle rather than a blur pass. Keeps the
+          // edge crisp and costs nothing on the GPU.
+          Rectangle {
+            anchors.centerIn: parent
+            width: dot.width * 2.1
+            height: width
+            radius: width / 2
+            color: Qt.alpha(capsule.accentColor, 0.16)
+            opacity: dot.opacity
+          }
+
+          Rectangle {
+            id: dot
+            anchors.centerIn: parent
+            width: cell.baseSize * (0.8 + 0.35 * cell.levelBoost)
+            height: width
+            radius: width / 2
+            color: capsule.accentColor
+
+            SequentialAnimation on opacity {
+              running: capsule.visible
+              loops: Animation.Infinite
+              // Staggered wave: dot 0 leads, 1 follows, 2 trails.
+              PauseAnimation {
+                duration: cell.index * 160
+              }
+              NumberAnimation {
+                from: 0.3
+                to: 1.0
+                duration: root.mode === "listening" ? 620 : 380
+                easing.type: Easing.InOutSine
+              }
+              NumberAnimation {
+                from: 1.0
+                to: 0.3
+                duration: root.mode === "listening" ? 620 : 380
+                easing.type: Easing.InOutSine
+              }
+              PauseAnimation {
+                duration: (2 - cell.index) * 160
+              }
+            }
+
+            Behavior on width {
+              NumberAnimation {
+                duration: 90
+                easing.type: Easing.OutQuad
+              }
+            }
+          }
         }
       }
     }
   }
 
+  // ---- Meeting pill (screen-share safe: dim, tiny, minimal motion) ----
   Rectangle {
     id: meetingPill
     anchors.centerIn: parent
@@ -144,6 +179,7 @@ PanelWindow {
     Row {
       anchors.centerIn: parent
       spacing: 6
+
       Rectangle {
         id: recDot
         width: 7
@@ -154,12 +190,24 @@ PanelWindow {
         SequentialAnimation on opacity {
           loops: Animation.Infinite
           running: meetingPill.visible
-          NumberAnimation { from: 0.35; to: 0.85; duration: 1000; easing.type: Easing.InOutSine }
-          NumberAnimation { from: 0.85; to: 0.35; duration: 1000; easing.type: Easing.InOutSine }
+          NumberAnimation {
+            from: 0.35
+            to: 0.85
+            duration: 1000
+            easing.type: Easing.InOutSine
+          }
+          NumberAnimation {
+            from: 0.85
+            to: 0.35
+            duration: 1000
+            easing.type: Easing.InOutSine
+          }
         }
       }
+
       Text {
         anchors.verticalCenter: parent.verticalCenter
+        // ponytail: raw Text — NText pulls theme fonts that read loud on a shared screen
         text: {
           var elapsed = root.meeting && root.meeting.elapsed !== undefined ? root.meeting.elapsed : 0;
           return root.main?.formatElapsed ? root.main.formatElapsed(elapsed) : "00:00";
