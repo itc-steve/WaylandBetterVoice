@@ -1,0 +1,6 @@
+// Add `include "./cfg/waylandbettervoice.kdl"` to your niri config yourself.
+// Installer never edits your niri configuration.
+binds {
+    Mod+ALT+D hotkey-overlay-title="WaylandBetterVoice: Dictate" { spawn-sh "wbv dictate toggle"; }
+    Mod+ALT+M hotkey-overlay-title="WaylandBetterVoice: Meeting" { spawn-sh "wbv meeting toggle"; }
+}

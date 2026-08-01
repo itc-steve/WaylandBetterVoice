@@ -1,0 +1,34 @@
+{
+  "id": "waylandbettervoice",
+  "name": "WaylandBetterVoice",
+  "version": "1.0.0",
+  "minNoctaliaVersion": "4.4.3",
+  "author": "WaylandBetterVoice",
+  "license": "MIT",
+  "repository": "https://github.com/noctalia-dev/noctalia-plugins",
+  "description": "Dictation and meeting overlay for the WaylandBetterVoice daemon (niri / strict Wayland).",
+  "tags": [
+    "Bar",
+    "Panel",
+    "System",
+    "Niri"
+  ],
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "dependencies": {
+    "plugins": []
+  },
+  "metadata": {
+    "defaultSettings": {
+      "overlayTopMargin": 46,
+      "orbScale": 1.0,
+      "showOrbWhileTranscribing": true,
+      "meetingPillEnabled": true,
+      "iconColor": "none"
+    }
+  }
+}

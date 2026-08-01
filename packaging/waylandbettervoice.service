@@ -1,0 +1,13 @@
+[Unit]
+Description=WaylandBetterVoice daemon
+After=pipewire.service
+
+[Service]
+Type=simple
+# Preloads Whisper model into VRAM at session start for fast transcription.
+ExecStart=/usr/bin/wbv daemon --foreground
+Restart=on-failure
+# No PrivateDevices or ProtectHome: PipeWire and CUDA require device and user-data access.
+
+[Install]
+WantedBy=graphical-session.target

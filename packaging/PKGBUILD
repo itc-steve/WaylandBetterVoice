@@ -1,0 +1,50 @@
+# Local-only package: source=() builds directly from this repository's parent directory.
+pkgname=waylandbettervoice
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Local Wayland voice dictation and meeting transcription"
+arch=('any')
+license=('MIT')
+depends=(
+  'python'
+  'python-numpy'
+  'python-pywhispercpp'
+  'wtype'
+  'wl-clipboard'
+  'pipewire'
+  'libpulse'
+  'libnotify'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-wheel'
+)
+optdepends=(
+  'python-sherpa-onnx: meeting speaker diarization'
+  'noctalia-shell: overlay plugin'
+)
+install='wbv.install'
+source=()
+sha256sums=()
+
+_repo_root="${startdir}/.."
+
+build() {
+  cd "${_repo_root}"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "${_repo_root}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+
+  install -Dm644 packaging/waylandbettervoice.service \
+    "${pkgdir}/usr/lib/systemd/user/waylandbettervoice.service"
+  install -Dm644 packaging/niri-keybinds.kdl \
+    "${pkgdir}/usr/share/waylandbettervoice/niri-keybinds.kdl"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  cp -a noctalia-plugin/waylandbettervoice \
+    "${pkgdir}/usr/share/waylandbettervoice/noctalia-plugin"
+}

@@ -1,0 +1,13 @@
+post_install() {
+  cat <<'EOF'
+WaylandBetterVoice installed.
+
+Next steps (run as your normal desktop user):
+  1. Enable service: systemctl --user enable --now waylandbettervoice.service
+  2. Link plugin: ln -s /usr/share/waylandbettervoice/noctalia-plugin ~/.config/noctalia/plugins/waylandbettervoice
+  3. Copy /usr/share/waylandbettervoice/niri-keybinds.kdl to ~/.config/niri/cfg/waylandbettervoice.kdl,
+     then add include "./cfg/waylandbettervoice.kdl" to your niri config.
+
+Existing vocalinux installation, autostart, and CUDA pywhispercpp provider remain untouched.
+EOF
+}

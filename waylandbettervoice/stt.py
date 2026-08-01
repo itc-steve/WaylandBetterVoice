@@ -1,0 +1,80 @@
+"""pywhispercpp model wrapper — load once, keep VRAM-resident."""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import numpy as np
+from pywhispercpp.model import Model
+
+from waylandbettervoice.config import LOG_PATH, MODEL_DIR
+
+log = logging.getLogger("wbv.stt")
+
+VOCALINUX_MODEL_DIR = Path.home() / ".local/share/vocalinux/models/whispercpp"
+
+
+def resolve_model_path(name: str) -> Path:
+    """config model name inside MODEL_DIR, else vocalinux models dir."""
+    primary = MODEL_DIR / name
+    if primary.is_file():
+        log.info("using model: %s", primary)
+        return primary
+    fallback = VOCALINUX_MODEL_DIR / name
+    if fallback.is_file():
+        log.info("using model (vocalinux fallback): %s", fallback)
+        return fallback
+    # last resort: return primary path so Model raises a clear error
+    log.warning("model not found at %s or %s", primary, fallback)
+    return primary
+
+
+def load_model(config: dict) -> Model:
+    """Load whisper model once at daemon start. language=en, translate=False."""
+    name = config.get("model", "ggml-large-v3.bin")
+    path = resolve_model_path(name)
+    n_threads = int(config.get("n_threads", 8))
+    beam_size = int(config.get("beam_size", 5))
+    language = config.get("language", "en") or "en"
+
+    # beam_size > 1 → BEAM_SEARCH strategy (params_sampling_strategy != 0)
+    strategy = 1 if beam_size and beam_size > 1 else 0
+    params: dict = {
+        "language": language,
+        "translate": False,
+        "n_threads": n_threads,
+        "print_realtime": False,
+        "print_progress": False,
+    }
+    if strategy:
+        # pywhispercpp accepts beam_search dict via **params
+        params["beam_search"] = {"beam_size": beam_size, "patience": -1.0}
+
+    log.info("loading whisper model %s (threads=%s beam=%s)", path, n_threads, beam_size)
+    model = Model(
+        model=str(path),
+        models_dir=None,
+        params_sampling_strategy=strategy,
+        redirect_whispercpp_logs_to=str(LOG_PATH),
+        **params,
+    )
+    log.info("model loaded")
+    return model
+
+
+def transcribe(model: Model, pcm_int16_bytes: bytes) -> str:
+    """Convert int16 PCM → float32 [-1,1], run model.transcribe, join segment text."""
+    if not pcm_int16_bytes:
+        return ""
+    n = len(pcm_int16_bytes) - (len(pcm_int16_bytes) % 2)
+    if n == 0:
+        return ""
+    # ponytail: whole-utterance buffer in RAM; stream/VAD if dictation_max_seconds grows huge
+    audio = np.frombuffer(pcm_int16_bytes[:n], dtype=np.int16).astype(np.float32) / 32768.0
+    segments = model.transcribe(audio)
+    parts = []
+    for seg in segments or []:
+        t = (seg.text or "").strip()
+        if t:
+            parts.append(t)
+    return " ".join(parts).strip()

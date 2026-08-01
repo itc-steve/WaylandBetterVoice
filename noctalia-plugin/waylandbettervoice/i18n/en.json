@@ -1,0 +1,50 @@
+{
+  "widget": {
+    "tooltip": "WaylandBetterVoice — {mode} · {model}",
+    "tooltip_offline": "WaylandBetterVoice — daemon offline"
+  },
+  "menu": {
+    "settings": "Widget settings",
+    "meeting_start": "Start meeting",
+    "meeting_stop": "Stop meeting",
+    "open_panel": "Open panel"
+  },
+  "panel": {
+    "title": "WaylandBetterVoice",
+    "daemon": "Daemon",
+    "daemon_up": "Running",
+    "daemon_down": "Offline",
+    "model": "Model",
+    "mode": "Mode",
+    "last_text": "Last transcript",
+    "last_text_empty": "(no transcript yet)",
+    "copy": "Copy",
+    "meeting": "Meeting",
+    "meeting_start": "Start meeting",
+    "meeting_stop": "Stop meeting",
+    "meeting_elapsed": "Elapsed",
+    "open_meetings": "Open meetings folder",
+    "error": "Error",
+    "no_error": "None"
+  },
+  "settings": {
+    "overlay_margin_label": "Overlay top margin",
+    "overlay_margin_desc": "Pixels below the top of the screen so the overlay clears the bar (default 46).",
+    "orb_scale_label": "Orb scale",
+    "orb_scale_desc": "Size multiplier for the dictation orb cluster (default 1.0).",
+    "show_transcribing_label": "Show orb while transcribing",
+    "show_transcribing_desc": "Keep the orb visible during the transcribing phase (calmer palette).",
+    "meeting_pill_label": "Show meeting pill",
+    "meeting_pill_desc": "Screen-share safe dim pill with elapsed timer while a meeting is active.",
+    "icon_color_label": "Bar icon color",
+    "icon_color_desc": "Tint of the bar mic icon when idle (mode still overrides while active)."
+  },
+  "mode": {
+    "offline": "offline",
+    "idle": "idle",
+    "dictating": "dictating",
+    "transcribing": "transcribing",
+    "meeting": "meeting",
+    "error": "error"
+  }
+}
