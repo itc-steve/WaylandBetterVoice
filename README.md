@@ -91,13 +91,16 @@ into `~/.local/share/waylandbettervoice/models/` — nothing is fetched without 
 |---|---|
 | `Super+Space` | Start / stop listening. While listening, each pause types a sentence. |
 | `Super+Alt+Space` | Start / stop recording a meeting. |
-| `Super+Alt+X` | Cancel dictation without typing anything. |
 
 Everything is also available on the CLI and from the bar widget:
 
 ```bash
 wbv dictate toggle      # or start / stop / cancel
 wbv meeting toggle      # or start / stop
+# `dictate cancel` drops the in-flight utterance instead of typing it. There is no
+# bind for it by default — sentences are typed as soon as you pause, so whatever is
+# already on screen is gone either way. Uncomment the line in the keybind snippet if
+# you want it on a key.
 wbv status --json
 wbv model list          # what is downloaded, what is available
 wbv model download <name>

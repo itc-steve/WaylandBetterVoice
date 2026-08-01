@@ -10,5 +10,10 @@
 binds {
     Mod+Space       repeat=false hotkey-overlay-title="Dictate: start/stop listening" { spawn-sh "wbv dictate toggle"; }
     Mod+ALT+Space   repeat=false hotkey-overlay-title="Meeting: start/stop recording" { spawn-sh "wbv meeting toggle"; }
-    Mod+ALT+X       repeat=false hotkey-overlay-title="Dictate: cancel without typing" { spawn-sh "wbv dictate cancel"; }
 }
+
+// Optional: discard the in-flight utterance instead of typing it. Rarely needed,
+// because sentences are typed as soon as you pause — anything already typed is gone
+// either way. Available as `wbv dictate cancel` without a bind.
+//
+// Mod+ALT+X   repeat=false hotkey-overlay-title="Dictate: cancel without typing" { spawn-sh "wbv dictate cancel"; }
