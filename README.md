@@ -49,7 +49,9 @@ CUDA arch, the audio node resolution, and the VAD thresholds. See
 
 ## Install
 
-Requires the Blackwell CUDA whisper build to exist first (see above).
+Requires the Blackwell CUDA whisper build to exist first — the PKGBUILD is vendored in
+[`packaging/python-pywhispercpp-cuda/`](packaging/python-pywhispercpp-cuda/) with build
+instructions and the line to change for other GPUs.
 
 ```bash
 git clone https://github.com/itc-steve/WaylandBetterVoice.git
@@ -258,7 +260,7 @@ Speaker labelling needs `python-sherpa-onnx` and an embedding model. See
 
 The machine-specific pieces, in the order you will hit them:
 
-1. **CUDA architecture** — rebuild `python-pywhispercpp` with your card's compute
+1. **CUDA architecture** — rebuild [`packaging/python-pywhispercpp-cuda`](packaging/python-pywhispercpp-cuda/) with your card's compute
    capability instead of `120`.
 2. **VAD thresholds** — `vad_start_level` / `vad_stop_level` assume a specific mic and
    filter chain.
