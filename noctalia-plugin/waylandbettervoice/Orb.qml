@@ -1,43 +1,36 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 
-// Overlay window: thinking-orbs while dictating/transcribing, discreet pill while meeting.
-// Reads live state from pluginApi.mainInstance (owned by Main.qml).
+// Overlay window: glowing thinking-orbs while listening/dictating/transcribing,
+// discreet pill while meeting.
 PanelWindow {
   id: root
 
   property var pluginApi: null
-
-  // Set directly by Main.qml; falls back to the shell-provided instance.
   property var main: pluginApi?.mainInstance
   readonly property string mode: main?.mode ?? "offline"
   readonly property real level: main?.level ?? 0.0
-  readonly property var meeting: main?.meeting ?? ({
-                                                     "elapsed": 0
-                                                   })
+  readonly property var meeting: main?.meeting ?? ({ "elapsed": 0 })
   readonly property real overlayTopMargin: main?.overlayTopMargin ?? 46
   readonly property real orbScale: main?.orbScale ?? 1.0
   readonly property bool showOrbs: main?.showOrbs ?? false
   readonly property bool showMeetingPill: main?.showMeetingPill ?? false
 
-  // Base cluster size ~180x60, scaled.
   readonly property real baseW: 180 * orbScale
   readonly property real baseH: 60 * orbScale
   readonly property real pillW: 110
   readonly property real pillH: 26
-
   readonly property real contentW: showMeetingPill ? pillW : baseW
   readonly property real contentH: showMeetingPill ? pillH : baseH
 
-  // Top-anchored, horizontally centered (only top set → compositor centers).
   anchors.top: true
   anchors.left: false
   anchors.right: false
   anchors.bottom: false
   margins.top: overlayTopMargin
-
   implicitWidth: Math.round(contentW)
   implicitHeight: Math.round(contentH)
   color: "transparent"
@@ -49,92 +42,93 @@ PanelWindow {
   exclusionMode: ExclusionMode.Ignore
   focusable: false
 
-  // ---- Dictation / transcription orbs ----
   Item {
     id: orbCluster
     anchors.fill: parent
     visible: root.showOrbs
-    opacity: root.mode === "transcribing" ? 0.7 : 1.0
+    opacity: root.mode === "listening" ? 0.48 : root.mode === "transcribing" ? 0.7 : 1.0
+    property real responseLevel: Math.min(1.0, Math.max(0.0, root.level))
+    readonly property real pulse: root.mode === "dictating" ? 0.92 + 0.28 * responseLevel : root.mode === "listening" ? 0.72 : 0.84
 
-    // Slow continuous rotation of the whole cluster.
-    property real spin: 0
-    NumberAnimation on spin {
-      from: 0
-      to: 360
-      duration: root.mode === "transcribing" ? 14000 : 9000
-      loops: Animation.Infinite
-      running: orbCluster.visible
+    // Fast attack, slow release keeps speech response lively without jitter.
+    Behavior on responseLevel {
+      NumberAnimation {
+        duration: root.level > orbCluster.responseLevel ? 110 : 480
+        easing.type: root.level > orbCluster.responseLevel ? Easing.OutCubic : Easing.InOutSine
+      }
     }
 
-    // Level-driven pulse (0.85–1.15).
-    readonly property real pulse: 0.85 + 0.3 * Math.min(1.0, Math.max(0.0, root.level))
-
-    // Three soft orbs orbiting a center point.
-    // Spirit of thinking-orbs; original code. Soft look via layered translucent circles
-    // (no MultiEffect blur required — cheaper, still reads as glow).
     Repeater {
       model: 3
 
       Item {
         id: orb
         required property int index
-
-        readonly property real angle: (index * 120 + orbCluster.spin) * Math.PI / 180
-        readonly property real orbitR: (root.baseW * 0.22) * (root.mode === "transcribing" ? 0.75 : 1.0)
-        readonly property real cx: root.baseW / 2 + Math.cos(angle) * orbitR
-        readonly property real cy: root.baseH / 2 + Math.sin(angle) * orbitR * 0.55
-        readonly property real size: (root.baseH * 0.7) * orbCluster.pulse * (index === 0 ? 1.0 : index === 1 ? 0.85 : 0.7)
-
-        // Palette: primary/secondary/tertiary; calmer (secondary-heavy) while transcribing.
+        property real phase: index * 120
+        readonly property real angle: phase * Math.PI / 180
+        readonly property real orbitR: root.baseW * (root.mode === "listening" ? 0.15 : root.mode === "transcribing" ? 0.18 : 0.22) * (1.0 + 0.08 * Math.sin(angle * 1.7 + index))
+        readonly property real size: root.baseH * (root.mode === "listening" ? 0.46 : 0.7) * orbCluster.pulse * (index === 0 ? 1.0 : index === 1 ? 0.86 : 0.72)
         readonly property color coreColor: {
-          if (root.mode === "transcribing") {
-            if (index === 0)
-              return Color.mSecondary;
-            if (index === 1)
-              return Color.mTertiary;
-            return Color.mPrimary;
-          }
-          if (index === 0)
-            return Color.mPrimary;
-          if (index === 1)
-            return Color.mSecondary;
-          return Color.mTertiary;
+          if (root.mode === "transcribing")
+            return index === 0 ? Color.mSecondary : index === 1 ? Color.mTertiary : Color.mPrimary;
+          return index === 0 ? Color.mPrimary : index === 1 ? Color.mSecondary : Color.mTertiary;
         }
 
-        x: cx - size / 2
-        y: cy - size / 2
+        x: root.baseW / 2 + Math.cos(angle) * orbitR - width / 2
+        y: root.baseH / 2 + Math.sin(angle) * orbitR * 0.55 - height / 2
         width: size
         height: size
 
-        // Outer soft halo
-        Rectangle {
-          anchors.centerIn: parent
-          width: parent.width * 1.35
-          height: parent.height * 1.35
-          radius: width / 2
-          color: Qt.alpha(orb.coreColor, root.mode === "transcribing" ? 0.12 : 0.18)
+        NumberAnimation on phase {
+          from: index * 120
+          to: index * 120 + 360
+          duration: root.mode === "listening" ? 18000 + index * 1700 : root.mode === "transcribing" ? 14000 + index * 1300 : 7200 + index * 900
+          loops: Animation.Infinite
+          running: orbCluster.visible
         }
-        // Mid glow
-        Rectangle {
-          anchors.centerIn: parent
-          width: parent.width * 1.1
-          height: parent.height * 1.1
-          radius: width / 2
-          color: Qt.alpha(orb.coreColor, root.mode === "transcribing" ? 0.28 : 0.4)
+
+        Item {
+          id: orbArt
+          anchors.fill: parent
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 1.28
+            height: parent.height * 1.28
+            radius: width / 2
+            color: Qt.alpha(orb.coreColor, root.mode === "listening" ? 0.12 : 0.2)
+          }
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width
+            height: parent.height
+            radius: width / 2
+            color: Qt.alpha(orb.coreColor, root.mode === "transcribing" ? 0.4 : 0.58)
+          }
+          Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 0.62
+            height: parent.height * 0.62
+            radius: width / 2
+            color: Qt.alpha(orb.coreColor, root.mode === "listening" ? 0.52 : 0.9)
+          }
         }
-        // Core
-        Rectangle {
+
+        // Installed Qt 6.5+ MultiEffect gives layered circles a real soft halo.
+        MultiEffect {
           anchors.centerIn: parent
-          width: parent.width * 0.7
-          height: parent.height * 0.7
-          radius: width / 2
-          color: Qt.alpha(orb.coreColor, root.mode === "transcribing" ? 0.55 : 0.75)
+          width: orbArt.width * 1.8
+          height: orbArt.height * 1.8
+          source: orbArt
+          blurEnabled: true
+          blur: 0.72
+          blurMax: 32
+          opacity: root.mode === "listening" ? 0.36 : root.mode === "transcribing" ? 0.52 : 0.76
+          z: -1
         }
       }
     }
   }
 
-  // ---- Meeting pill (screen-share safe) ----
   Rectangle {
     id: meetingPill
     anchors.centerIn: parent
@@ -150,8 +144,6 @@ PanelWindow {
     Row {
       anchors.centerIn: parent
       spacing: 6
-
-      // Dim red dot, 2s fade pulse.
       Rectangle {
         id: recDot
         width: 7
@@ -159,37 +151,18 @@ PanelWindow {
         radius: 3.5
         anchors.verticalCenter: parent.verticalCenter
         color: Qt.rgba(0.55, 0.12, 0.12, 1.0)
-
         SequentialAnimation on opacity {
           loops: Animation.Infinite
           running: meetingPill.visible
-          NumberAnimation {
-            from: 0.35
-            to: 0.85
-            duration: 1000
-            easing.type: Easing.InOutSine
-          }
-          NumberAnimation {
-            from: 0.85
-            to: 0.35
-            duration: 1000
-            easing.type: Easing.InOutSine
-          }
+          NumberAnimation { from: 0.35; to: 0.85; duration: 1000; easing.type: Easing.InOutSine }
+          NumberAnimation { from: 0.85; to: 0.35; duration: 1000; easing.type: Easing.InOutSine }
         }
       }
-
       Text {
-        // Raw Text — NText pulls theme fonts that read loud on a screen-share pill.
-        // ponytail: raw Text for discreet share-safe timer, NText if pill ever leaves overlay
         anchors.verticalCenter: parent.verticalCenter
         text: {
           var elapsed = root.meeting && root.meeting.elapsed !== undefined ? root.meeting.elapsed : 0;
-          if (root.main && root.main.formatElapsed)
-            return root.main.formatElapsed(elapsed);
-          var s = Math.max(0, Math.floor(Number(elapsed) || 0));
-          var m = Math.floor(s / 60);
-          var r = s % 60;
-          return (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r;
+          return root.main?.formatElapsed ? root.main.formatElapsed(elapsed) : "00:00";
         }
         color: Qt.rgba(0.75, 0.75, 0.75, 0.9)
         font.pixelSize: 11

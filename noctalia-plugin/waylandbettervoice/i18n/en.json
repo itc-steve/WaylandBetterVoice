@@ -42,6 +42,7 @@
   "mode": {
     "offline": "offline",
     "idle": "idle",
+    "listening": "listening",
     "dictating": "dictating",
     "transcribing": "transcribing",
     "meeting": "meeting",

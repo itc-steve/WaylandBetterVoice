@@ -9,9 +9,15 @@ from waylandbettervoice import __version__
 from waylandbettervoice import ipc
 
 
+# Stopping a long meeting finalizes transcripts and mixes the wav; draining queued
+# dictation utterances waits on whisper. Both blow past the 5 s default.
+_SLOW_COMMANDS = {"meeting.stop", "meeting.toggle", "dictate.stop", "dictate.toggle", "quit"}
+
+
 def _client(cmd: str, args: dict | None = None) -> int:
+    timeout = 180.0 if cmd in _SLOW_COMMANDS else 5.0
     try:
-        resp = ipc.send(cmd, args or {})
+        resp = ipc.send(cmd, args or {}, timeout=timeout)
     except ConnectionError as e:
         print(str(e), file=sys.stderr)
         return 1

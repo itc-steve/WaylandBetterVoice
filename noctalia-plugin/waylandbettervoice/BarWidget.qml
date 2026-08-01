@@ -31,6 +31,8 @@ Item {
 
   // Tint by mode; idle falls back to configured icon color.
   readonly property color modeColor: {
+    if (mode === "listening")
+      return Color.mTertiary;
     if (mode === "dictating")
       return Color.mPrimary;
     if (mode === "transcribing")

@@ -41,6 +41,8 @@ qs -c noctalia-shell
 
 Expect no QML errors mentioning `waylandbettervoice`. With the daemon up, `$XDG_RUNTIME_DIR/waylandbettervoice/state.json` updates drive the bar tint + overlay.
 
+`Main.qml` also reloads once per second until first read, then only after its file watcher has been quiet for three seconds. This recovers state files created after Noctalia starts and daemon restarts without polling healthy 10 Hz updates.
+
 IPC smoke (from another terminal while shell is running):
 
 ```bash
@@ -48,13 +50,25 @@ qs ipc call plugin:waylandbettervoice dictate
 qs ipc call plugin:waylandbettervoice meeting
 ```
 
+## FileView recovery harness
+
+This reproduces boot order safely: start with target absent, then create it after `qs -p` starts. `watchChanges` alone misses this creation; timer calls `reload()` until `RECOVERED` prints.
+
+```bash
+rm -f "$XDG_RUNTIME_DIR/wbv-fileview-recovery.json"
+(sleep 2; printf recovered >"$XDG_RUNTIME_DIR/wbv-fileview-recovery.json") &
+timeout 6 qs -p FileViewRecovery.qml
+```
+
+Observed (2026-08-01): `WAITING` → `RELOAD` → `WAITING` → `RELOAD` → `RECOVERED recovered` (exit 124 is `timeout` ending the intentionally persistent harness).
+
 ## Behaviour
 
 | Surface | Role |
 |---|---|
-| **Main.qml** | Watches `state.json`, owns overlay Loader, IPC `dictate`/`meeting`, CLI helpers |
-| **Orb.qml** | `PanelWindow` overlay — 3 themed orbs (dictate/transcribe) or dim meeting pill |
-| **BarWidget.qml** | Mic capsule; LMB = `wbv dictate toggle`; RMB = panel / meeting / settings |
+| **Main.qml** | Watches and recovers `state.json`; owns overlay, IPC `dictate`/`meeting`, CLI helpers |
+| **Orb.qml** | `PanelWindow` overlay — dim slow orbs while listening, level-reactive bright orbs while dictating, calm rotating orbs while transcribing, dim meeting pill |
+| **BarWidget.qml** | Mic capsule; tint: offline muted, idle configured, listening tertiary, dictating primary, transcribing secondary, meeting/error error; LMB = `wbv dictate toggle` |
 | **Panel.qml** | Status, last transcript (selectable + copy), meeting control, open meetings folder |
 | **Settings.qml** | Overlay margin, orb scale, show-while-transcribing, meeting pill, bar icon color |
 

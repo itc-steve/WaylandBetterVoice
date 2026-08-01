@@ -19,7 +19,14 @@ DEFAULTS: dict = {
     "language": "en",
     "n_threads": 8,
     "beam_size": 5,
-    "dictation_max_seconds": 300,
+    # ponytail: VAD thresholds tuned for Shure MV6 via EasyEffects — retune if quiet mic gets eaten
+    "dictation_max_seconds": 30,  # cap on ONE utterance (not session)
+    "listen_max_minutes": 30,  # hard cap on a continuous listening session
+    "silence_seconds": 0.8,  # pause that ends an utterance
+    "vad_start_level": 0.015,  # RMS to consider speech started
+    "vad_stop_level": 0.008,  # RMS below this counts as silence
+    "min_utterance_seconds": 0.4,  # shorter -> discarded
+    "preroll_seconds": 0.3,  # audio kept before speech onset
     "meeting_max_minutes": 180,
     "inject_method": "wtype",
     "wtype_delay_ms": 0,

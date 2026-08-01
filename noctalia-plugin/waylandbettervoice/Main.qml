@@ -23,6 +23,8 @@ Item {
   property string error: ""
   property real since: 0
   property bool daemonUp: false
+  property bool stateLoaded: false
+  property real lastStateReadMs: 0
 
   readonly property var cfg: pluginApi?.pluginSettings || ({})
   readonly property var defaults: pluginApi?.manifest?.metadata?.defaultSettings || ({})
@@ -31,7 +33,7 @@ Item {
   readonly property bool showOrbWhileTranscribing: cfg.showOrbWhileTranscribing ?? defaults.showOrbWhileTranscribing ?? true
   readonly property bool meetingPillEnabled: cfg.meetingPillEnabled ?? defaults.meetingPillEnabled ?? true
 
-  readonly property bool showOrbs: mode === "dictating" || (mode === "transcribing" && showOrbWhileTranscribing)
+  readonly property bool showOrbs: mode === "listening" || mode === "dictating" || (mode === "transcribing" && showOrbWhileTranscribing)
   readonly property bool showMeetingPill: mode === "meeting" && meetingPillEnabled
   readonly property bool overlayActive: showOrbs || showMeetingPill
 
@@ -55,6 +57,7 @@ Item {
     error = "";
     since = 0;
     daemonUp = false;
+    stateLoaded = false;
   }
 
   function applyState(obj) {
@@ -79,15 +82,17 @@ Item {
   }
 
   function parseStateText(text) {
-    if (!text || text.trim() === "") {
-      applyOffline();
-      return;
-    }
+    if (!text || text.trim() === "")
+      return false;
     try {
       applyState(JSON.parse(text));
+      stateLoaded = true;
+      lastStateReadMs = Date.now();
+      return true;
     } catch (e) {
+      // Keep last state: an incomplete read is not evidence daemon went offline.
       Logger.w("waylandbettervoice", "state.json parse failed:", e);
-      applyOffline();
+      return false;
     }
   }
 
@@ -138,9 +143,22 @@ Item {
     }
     onLoaded: root.parseStateText(text())
     onLoadFailed: function (error) {
-      // Daemon not running / state not written yet.
+      // Missing state.json is the only offline signal; stale state stays visible.
       root.applyOffline();
       Logger.d("waylandbettervoice", "state file missing/unreadable:", error);
+    }
+  }
+
+  Timer {
+    id: stateRecoveryTimer
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: {
+      // FileView does not watch a path created after shell start. Poll only until
+      // first load, then once a healthy watch has been quiet for three seconds.
+      if (!root.stateLoaded || Date.now() - root.lastStateReadMs > 3000)
+        stateFile.reload();
     }
   }
 

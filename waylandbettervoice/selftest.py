@@ -33,7 +33,11 @@ def test_config_merge() -> None:
             # untouched keys keep defaults
             assert loaded["language"] == "en"
             assert loaded["beam_size"] == 5
-            assert loaded["dictation_max_seconds"] == 300
+            assert loaded["dictation_max_seconds"] == 30
+            assert loaded["silence_seconds"] == 0.8
+            assert loaded["listen_max_minutes"] == 30
+            assert loaded["vad_start_level"] == 0.015
+            assert loaded["preroll_seconds"] == 0.3
     finally:
         cfg.CONFIG_PATH = orig
     print("  config merge: ok")
@@ -136,9 +140,152 @@ def test_ipc_roundtrip() -> None:
     print("  ipc roundtrip: ok")
 
 
+def _fake_chunk(level_rms: float) -> bytes:
+    """Synthetic 20 ms int16 mono frame at approx RMS level (0..1)."""
+    import numpy as np
+    from waylandbettervoice.audio import CHUNK_BYTES
+
+    n = CHUNK_BYTES // 2
+    amp = int(max(0.0, min(1.0, level_rms)) * 32767)
+    return (np.ones(n, dtype=np.int16) * amp).tobytes()
+
+
+def test_endpointer_two_utterances() -> None:
+    """silence → speech → silence → speech → silence yields exactly 2 utterances."""
+    from waylandbettervoice.audio import CHUNK_BYTES, Endpointer, FRAME_SECONDS
+
+    ep = Endpointer(
+        silence_seconds=0.2,  # 10 frames
+        vad_start_level=0.015,
+        vad_stop_level=0.008,
+        min_utterance_seconds=0.1,
+        preroll_seconds=0.06,  # 3 frames
+        max_utterance_seconds=30.0,
+        start_hang_seconds=0.06,  # 3 frames
+    )
+    loud = _fake_chunk(0.05)
+    quiet = _fake_chunk(0.0)
+    assert len(loud) == CHUNK_BYTES
+
+    outs: list[bytes] = []
+
+    def feed_n(chunk: bytes, n: int, rms: float) -> None:
+        for _ in range(n):
+            outs.extend(ep.feed(rms, chunk))
+
+    # lead-in silence
+    feed_n(quiet, 10, 0.0)
+    assert outs == []
+    assert ep.in_speech is False
+
+    # utterance 1: speech then silence to endpoint
+    feed_n(loud, 20, 0.05)  # 400 ms speech (+ hang)
+    assert ep.in_speech is True
+    feed_n(quiet, 10, 0.0)  # 200 ms silence → end
+    assert len(outs) == 1
+    assert ep.in_speech is False
+
+    # gap silence
+    feed_n(quiet, 5, 0.0)
+    assert len(outs) == 1
+
+    # utterance 2
+    feed_n(loud, 15, 0.05)
+    assert ep.in_speech is True
+    feed_n(quiet, 10, 0.0)
+    assert len(outs) == 2
+    assert ep.in_speech is False
+
+    # each utterance includes preroll + speech; must be longer than min
+    min_bytes = int(0.1 * 16000) * 2
+    for i, utt in enumerate(outs):
+        assert len(utt) >= min_bytes, f"utt {i} too short: {len(utt)}"
+        # boundaries: multiple of frame size
+        assert len(utt) % CHUNK_BYTES == 0
+
+    # duration sanity: utt1 ~ preroll(if any before hang) + hang + speech + trailing silence frames
+    # at least the 20 speech frames worth
+    assert len(outs[0]) >= 20 * CHUNK_BYTES
+    assert len(outs[1]) >= 15 * CHUNK_BYTES
+
+    # flush idle → nothing
+    assert ep.flush() == []
+    print("  endpointer two utterances: ok")
+
+
+def test_endpointer_short_blip_discarded() -> None:
+    """Speech shorter than min_utterance_seconds is dropped."""
+    from waylandbettervoice.audio import CHUNK_BYTES, Endpointer
+
+    ep = Endpointer(
+        silence_seconds=0.1,  # 5 frames
+        vad_start_level=0.015,
+        vad_stop_level=0.008,
+        min_utterance_seconds=0.4,  # 20 frames
+        preroll_seconds=0.04,
+        max_utterance_seconds=30.0,
+        start_hang_seconds=0.04,  # 2 frames
+    )
+    loud = _fake_chunk(0.05)
+    quiet = _fake_chunk(0.0)
+    outs: list[bytes] = []
+    for _ in range(3):
+        outs.extend(ep.feed(0.0, quiet))
+    # 2 hang + 2 more speech frames = ~80 ms total speech body — under 0.4 s even with preroll
+    for _ in range(4):
+        outs.extend(ep.feed(0.05, loud))
+    assert ep.in_speech is True
+    for _ in range(5):
+        outs.extend(ep.feed(0.0, quiet))
+    assert outs == [], f"expected no utterances, got {len(outs)} lens={[len(o) for o in outs]}"
+    assert ep.in_speech is False
+
+    # now a long enough one must pass
+    for _ in range(25):
+        outs.extend(ep.feed(0.05, loud))
+    for _ in range(5):
+        outs.extend(ep.feed(0.0, quiet))
+    assert len(outs) == 1
+    assert len(outs[0]) % CHUNK_BYTES == 0
+    print("  endpointer short blip: ok")
+
+
+def test_endpointer_flush_in_progress() -> None:
+    """flush() emits in-progress utterance when long enough."""
+    from waylandbettervoice.audio import Endpointer
+
+    ep = Endpointer(
+        silence_seconds=2.0,
+        vad_start_level=0.015,
+        vad_stop_level=0.008,
+        min_utterance_seconds=0.1,
+        preroll_seconds=0.04,
+        max_utterance_seconds=30.0,
+        start_hang_seconds=0.04,
+    )
+    loud = _fake_chunk(0.05)
+    for _ in range(15):
+        assert ep.feed(0.05, loud) == []
+    assert ep.in_speech is True
+    flushed = ep.flush()
+    assert len(flushed) == 1
+    assert ep.in_speech is False
+    # second flush empty
+    assert ep.flush() == []
+    print("  endpointer flush: ok")
+
+
 def main() -> int:
     print("waylandbettervoice selftest")
-    tests = [test_config_merge, test_state_atomic, test_rms_level, test_ipc_roundtrip]
+    tests = [
+        test_config_merge,
+        test_state_atomic,
+        test_rms_level,
+        test_ipc_roundtrip,
+        test_endpointer_two_utterances,
+        test_endpointer_short_blip_discarded,
+        test_endpointer_flush_in_progress,
+    ]
     failed = 0
     for t in tests:
         try:

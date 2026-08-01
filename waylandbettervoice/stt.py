@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -62,8 +63,18 @@ def load_model(config: dict) -> Model:
     return model
 
 
+# whisper.cpp's CUDA scheduler is NOT re-entrant. Two concurrent whisper_full calls
+# abort the process (GGML_ASSERT(!sched->is_alloc) -> SIGABRT, verified with a core
+# dump when a meeting's mic and system threads transcribed at the same time).
+# Every path into the model goes through this lock.
+_model_lock = threading.Lock()
+
+
 def transcribe(model: Model, pcm_int16_bytes: bytes) -> str:
-    """Convert int16 PCM → float32 [-1,1], run model.transcribe, join segment text."""
+    """Convert int16 PCM → float32 [-1,1], run model.transcribe, join segment text.
+
+    Serialized: concurrent calls queue instead of crashing the daemon.
+    """
     if not pcm_int16_bytes:
         return ""
     n = len(pcm_int16_bytes) - (len(pcm_int16_bytes) % 2)
@@ -71,7 +82,8 @@ def transcribe(model: Model, pcm_int16_bytes: bytes) -> str:
         return ""
     # ponytail: whole-utterance buffer in RAM; stream/VAD if dictation_max_seconds grows huge
     audio = np.frombuffer(pcm_int16_bytes[:n], dtype=np.int16).astype(np.float32) / 32768.0
-    segments = model.transcribe(audio)
+    with _model_lock:
+        segments = model.transcribe(audio)
     parts = []
     for seg in segments or []:
         t = (seg.text or "").strip()
