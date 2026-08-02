@@ -1,6 +1,10 @@
 [Unit]
 Description=WaylandBetterVoice daemon
 After=pipewire.service
+# WAYLAND_DISPLAY only lands in the systemd user env once the compositor is up.
+# Starting earlier leaves wtype with no Wayland socket (text goes to clipboard).
+After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
