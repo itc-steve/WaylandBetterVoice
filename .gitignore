@@ -9,7 +9,3 @@ __pycache__/
 *.pkg.tar.zst
 src/
 pkg/
-
-
-# Internal build notes (kept out of the public repo)
-docs/internal/

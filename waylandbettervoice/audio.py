@@ -34,9 +34,9 @@ def resolve_default_sink() -> str:
     """Sink NODE name to record system audio from (no '.monitor').
 
     The default sink is not always where audio really plays: with EasyEffects (or any
-    filter chain) apps land in the effects sink and only its output reaches the device,
-    so recording the default sink captures silence. Prefer a sink that currently has
-    playback streams attached; fall back to the default sink when nothing is playing.
+    filter chain) apps land in the effects sink while output reaches another device.
+    Prefer the sink carrying playback streams, including an idle EasyEffects sink before
+    playback starts; fall back to a running or default sink.
     """
     active = _sink_with_inputs()
     if active:
@@ -51,21 +51,15 @@ def resolve_default_sink() -> str:
 
 
 def _sink_with_inputs() -> Optional[str]:
-    """Sink that is actually carrying audio: RUNNING state, else most playback streams.
+    """Sink carrying playback streams, else any running sink.
 
-    On this machine the default sink is the Shure MV6 while EasyEffects re-routes apps
-    to a different device, so 'default' and 'where sound is' are not the same node.
+    Record the application-facing sink (for example EasyEffects), not an unrelated
+    running hardware sink. Filter routing may send that mix to a non-default device.
     """
     try:
         sinks = json.loads(subprocess.check_output(
             ["pactl", "-f", "json", "list", "sinks"], text=True, stderr=subprocess.DEVNULL
         ))
-        running = [s for s in sinks if str(s.get("state", "")).upper() == "RUNNING"]
-        if running:
-            # Physical device wins over filter sinks: it carries the final mix.
-            hardware = [s for s in running if str(s.get("name", "")).startswith("alsa_")]
-            return (hardware or running)[0].get("name")
-
         inputs = json.loads(subprocess.check_output(
             ["pactl", "-f", "json", "list", "sink-inputs"], text=True, stderr=subprocess.DEVNULL
         ))
@@ -79,6 +73,15 @@ def _sink_with_inputs() -> Optional[str]:
             for sink in sinks:
                 if sink.get("index") == busiest:
                     return sink.get("name")
+
+        # EasyEffects routes future app streams here even while the sink is suspended.
+        effects = next((s for s in sinks if s.get("name") == "easyeffects_sink"), None)
+        if effects:
+            return effects.get("name")
+
+        running = [s for s in sinks if str(s.get("state", "")).upper() == "RUNNING"]
+        if running:
+            return running[0].get("name")
     except (subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as e:
         log.debug("sink probe failed: %s", e)
     return None
@@ -124,7 +127,7 @@ class Capture:
         # stream.capture.sink=true is the working form. Strip the suffix defensively.
         if self.monitor and node.endswith(".monitor"):
             node = node[: -len(".monitor")]
-        cmd = ["pw-record"]
+        cmd = ["pw-record", "--raw"]
         if self.monitor:
             cmd += ["-P", "{ stream.capture.sink=true }"]
         cmd += [

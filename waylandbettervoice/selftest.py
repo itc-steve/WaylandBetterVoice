@@ -523,6 +523,44 @@ def test_hf_token_not_leaked_on_redirect() -> None:
     print("  hf token not leaked on redirect: ok")
 
 
+def test_meeting_capture_targets_playback_stream() -> None:
+    """Record sink carrying app audio, not unrelated running hardware; request raw PCM."""
+    from unittest.mock import patch
+    from waylandbettervoice import audio
+
+    sinks = [
+        {"index": 1, "name": "alsa_output.unrelated", "state": "RUNNING"},
+        {"index": 2, "name": "easyeffects_sink", "state": "RUNNING"},
+    ]
+    inputs = [{"sink": 2}]
+
+    def output(command, **_kwargs):
+        if command[-1] == "sinks":
+            return json.dumps(sinks)
+        if command[-1] == "sink-inputs":
+            return json.dumps(inputs)
+        raise AssertionError(command)
+
+    with patch.object(audio.subprocess, "check_output", side_effect=output):
+        assert audio._sink_with_inputs() == "easyeffects_sink"
+
+    inputs.clear()
+    sinks[1]["state"] = "SUSPENDED"
+    with patch.object(audio.subprocess, "check_output", side_effect=output):
+        assert audio._sink_with_inputs() == "easyeffects_sink"
+
+    class Process:
+        stdout = None
+        stderr = None
+
+    with patch.object(audio, "resolve_default_source", return_value="mic"), patch.object(
+        audio.subprocess, "Popen", return_value=Process()
+    ) as popen:
+        audio.Capture().start()
+    assert "--raw" in popen.call_args.args[0]
+    print("  meeting capture target/raw PCM: ok")
+
+
 def main() -> int:
     print("waylandbettervoice selftest")
     tests = [
@@ -539,6 +577,7 @@ def main() -> int:
         test_model_missing_error_message,
         test_hf_token_resolution_order,
         test_hf_token_not_leaked_on_redirect,
+        test_meeting_capture_targets_playback_stream,
     ]
     failed = 0
     for t in tests:
