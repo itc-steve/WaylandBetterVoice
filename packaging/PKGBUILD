@@ -1,6 +1,6 @@
 # Local-only package: source=() builds directly from this repository's parent directory.
 pkgname=waylandbettervoice
-pkgver=1.0.1
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Local Wayland voice dictation and meeting transcription"
 arch=('any')
@@ -23,6 +23,7 @@ makedepends=(
 optdepends=(
   'python-sherpa-onnx: meeting speaker diarization'
   'noctalia-shell: overlay plugin'
+  'ydotool: inject_method=ydotool, needed to type into Electron apps (Termius, VS Code)'
 )
 install='wbv.install'
 source=()
@@ -37,7 +38,7 @@ build() {
 
 package() {
   cd "${_repo_root}"
-  python -m installer --destdir="${pkgdir}" dist/*.whl
+  python -m installer --destdir="${pkgdir}" "dist/${pkgname}-${pkgver}-py3-none-any.whl"
 
   install -Dm644 packaging/waylandbettervoice.service \
     "${pkgdir}/usr/lib/systemd/user/waylandbettervoice.service"

@@ -22,6 +22,8 @@ anywhere: no API keys, no accounts, no network calls.
 
 ---
 
+<a id="requirements"></a>
+
 ## ⚠️ Built for one machine
 
 This is **not** a general-purpose Linux dictation tool. It was written for, and is only
@@ -34,6 +36,7 @@ tested on, a single very specific setup:
 | **Compositor** | niri 26.04, strict Wayland (no X11 fallback) |
 | **Shell** | Noctalia 4.7.7 / quickshell 0.0.12 — required only for the overlay |
 | **Audio** | PipeWire 1.6.8 |
+| **Injection** | `wtype` for native apps; `ydotool` + `uinput` if you dictate into Electron apps |
 
 The critical constraint is the GPU. This depends on a **Blackwell-specific build of
 `python-pywhispercpp` compiled with `CMAKE_CUDA_ARCHITECTURES=120`** — it contains
@@ -84,6 +87,9 @@ your bar.
 
 The installer is idempotent and refuses to run as root. Models are downloaded on demand
 into `~/.local/share/waylandbettervoice/models/` — nothing is fetched without you asking.
+
+If you dictate into Electron apps (Termius, VS Code, Discord), also set up `ydotool` —
+`wtype` cannot type into them. See [Text injection](#text-injection).
 
 ## Use
 
@@ -143,8 +149,24 @@ Each meeting writes a folder to `~/.local/share/waylandbettervoice/meetings/<tim
 | `mix.wav` | Both streams mixed, 16 kHz mono |
 
 The transcript is rewritten after every chunk, so an interrupted meeting still leaves a
-usable file. Speaker labelling is optional — see [docs/MEETING.md](docs/MEETING.md) to
-install it. Without it everything still records, and remote speakers are `Speaker ?`.
+usable file. Speaker labelling is optional — see [Speaker labelling](#speaker-labelling).
+Without it everything still records, and remote speakers are `Speaker ?`.
+
+#### Speaker labelling
+
+Needs `python-sherpa-onnx` plus a speaker-embedding model. The daemon picks up the first
+`*.onnx` found under `~/.local/share/waylandbettervoice/models/speaker/`:
+
+```bash
+sudo pacman -S python-sherpa-onnx
+
+cd ~/.local/share/waylandbettervoice/models/speaker
+curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+systemctl --user restart waylandbettervoice
+```
+
+Set `meeting_diarization` to `false` to turn it off, or `meeting_speakers` to a known
+participant count when auto-detection splits or merges people.
 
 ## Overlay
 
@@ -172,7 +194,7 @@ Super+Space ──▶ wbv CLI ──▶ unix socket ──▶ daemon (model resi
                                                │
                                      RMS endpointer: pause?
                                                │
-                                     whisper.cpp ──▶ wtype ──▶ focused window
+                              whisper.cpp ──▶ wtype/ydotool ──▶ focused window
                                                │
                                     state.json ──▶ Noctalia overlay
 ```
@@ -184,10 +206,8 @@ Deliberate choices:
 - **The model is loaded once** and stays in VRAM for the whole session. Cold start is
   about 0.6s at login; after that, transcription of a sentence is ~0.2s.
 - **One process, stdlib first.** No D-Bus, no socket activation, no venv. Audio capture
-  is `pw-record`; injection is `wtype`; the only non-stdlib imports are numpy,
-  pywhispercpp, and optionally sherpa-onnx.
-
-More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+  is `pw-record`; injection is `wtype` (or `ydotool`); the only non-stdlib imports are
+  numpy, pywhispercpp, and optionally sherpa-onnx.
 
 ## Configuration
 
@@ -211,11 +231,48 @@ More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | `meeting_diarization` | `true` | Label remote speakers |
 | `meeting_speakers` | `0` | Expected speaker count, `0` = auto |
 | `trailing_space` | `true` | Append a space after each injection |
+| `inject_method` | `wtype` | How text is typed — `wtype`, `ydotool`, or `clipboard`. See [Text injection](#text-injection) |
 | `notify_on_error` | `true` | Desktop notification on failure |
 
 The VAD thresholds are tuned for a Shure MV6 through an EasyEffects chain. A quieter or
 hotter mic will want different numbers — that is the first thing to adjust if sentences
 are cut short or never trigger.
+
+### Text injection
+
+`inject_method` picks how transcribed text reaches the focused window. Any method that
+fails falls back to the clipboard plus a notification, so text is never lost.
+
+| Method | Needs | Works in | Notes |
+|---|---|---|---|
+| `wtype` (default) | `wtype` | Native Wayland apps | No daemon, lowest latency. **Produces garbage in Electron apps** — see below |
+| `ydotool` | `ydotool` + `ydotoold` running | Everything, including Electron | Kernel `uinput`, so apps see ordinary key events |
+| `clipboard` | `wl-clipboard` | Everything | Copies only; you paste manually |
+
+**Why Electron apps get garbage with `wtype`.** `wtype` uses the Wayland
+`virtual_keyboard` protocol: it uploads its own temporary keymap and then presses
+keycodes in it. Electron/xterm.js apps (Termius, VS Code, Discord) ignore that keymap
+and decode the raw keycodes against the *system* layout instead, so `Hello` arrives as
+something like `22345`. `ydotool` goes through the kernel and produces real key events,
+which every app reads correctly.
+
+To use `ydotool`:
+
+```bash
+sudo pacman -S ydotool
+systemctl --user enable --now ydotool
+```
+
+The Arch package ships both the `ydotool.service` user unit and the udev rule that makes
+`/dev/uinput` group-`input` writable, so no manual `udevadm` or `modprobe` is normally
+needed. Confirm you are in the `input` group with `id -nG | grep input`; if you are not,
+run `sudo usermod -aG input "$USER"` and log out and back in.
+
+Then set `"inject_method": "ydotool"` in the config and restart the daemon:
+
+```bash
+systemctl --user restart waylandbettervoice
+```
 
 ## Troubleshooting
 
@@ -234,9 +291,33 @@ passes.
 <details>
 <summary><b>Text is not typed</b></summary>
 
-Injection uses `wtype`. If it fails, the text is copied to the clipboard and you get a
-notification instead of losing it. Some applications (notably Electron ones) reject
-synthetic input on Wayland — paste manually there.
+If injection fails the text is copied to the clipboard and you get a notification
+instead of losing it. Check `journalctl --user -u waylandbettervoice` for the reason.
+</details>
+
+<details>
+<summary><b>Typing produces numbers or garbage (e.g. "Hello" becomes "22345")</b></summary>
+
+You are typing into an Electron app — Termius, VS Code, Discord. They ignore the keymap
+`wtype` uploads and decode its keycodes against the system layout. Switch to `ydotool`,
+which uses the kernel and works everywhere. See [Text injection](#text-injection).
+
+This is not a terminal emulation setting; changing the terminal type in the app will not
+help, because the injection happens outside the SSH session entirely.
+</details>
+
+<details>
+<summary><b>ydotool types nothing at all</b></summary>
+
+```bash
+systemctl --user status ydotool          # must be active
+ls -l $XDG_RUNTIME_DIR/.ydotool_socket   # the daemon's socket must exist
+ls -l /dev/uinput                        # must be root:input, mode 0660
+id -nG | grep input                      # you must be in the input group
+```
+
+If `/dev/uinput` is missing, the module is not loaded: `sudo modprobe uinput`. If you
+were just added to `input`, log out and back in.
 </details>
 
 <details>
@@ -273,8 +354,11 @@ journalctl --user -u waylandbettervoice | grep 'starting capture'
 <details>
 <summary><b>Every meeting speaker is "Speaker ?"</b></summary>
 
-Speaker labelling needs `python-sherpa-onnx` and an embedding model. See
-[docs/MEETING.md](docs/MEETING.md). It is optional and everything else works without it.
+Speaker labelling needs `python-sherpa-onnx` and an embedding model in
+`~/.local/share/waylandbettervoice/models/speaker/`. See
+[Speaker labelling](#speaker-labelling). It is optional and everything else works
+without it — check `journalctl --user -u waylandbettervoice | grep diarization` to see
+which of the two is missing.
 </details>
 
 ## Porting to other hardware
@@ -289,6 +373,9 @@ The machine-specific pieces, in the order you will hit them:
    and others need their own equivalent calling the same `wbv` commands.
 4. **The overlay** is a Noctalia plugin. Without Noctalia the daemon works fine, you
    just lose the on-screen indicator.
+5. **Injection** — `wtype` needs a compositor implementing `virtual_keyboard`. On a
+   compositor without it (or under X11), use `inject_method: ydotool`, which only needs
+   the kernel's `uinput`.
 
 Nothing else is hardware-specific.
 
@@ -298,6 +385,7 @@ Nothing else is hardware-specific.
   [pywhispercpp](https://github.com/Absadiki/pywhispercpp) — transcription
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — optional speaker embeddings
 - [PipeWire](https://pipewire.org), [wtype](https://github.com/atx/wtype),
+  [ydotool](https://github.com/ReimuNotMoe/ydotool),
   [niri](https://github.com/YaLTeR/niri), and
   [Noctalia](https://github.com/noctalia-dev/noctalia-shell)
 

@@ -35,8 +35,9 @@ DEFAULTS: dict = {
     "min_utterance_seconds": 0.4,  # shorter -> discarded
     "preroll_seconds": 0.3,  # audio kept before speech onset
     "meeting_max_minutes": 180,
+    # wtype | ydotool | clipboard — see inject.py. wtype cannot type into
+    # Electron apps (Termius, VS Code); use ydotool for those.
     "inject_method": "wtype",
-    "wtype_delay_ms": 0,
     "trailing_space": True,
     "meeting_diarization": True,
     "meeting_speakers": 0,

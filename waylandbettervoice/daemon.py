@@ -139,7 +139,11 @@ def _worker_loop() -> None:
             continue
         if text:
             try:
-                inject.type_text(text, trailing_space=bool(_config.get("trailing_space", True)))
+                inject.type_text(
+                    text,
+                    trailing_space=bool(_config.get("trailing_space", True)),
+                    method=str(_config.get("inject_method", "wtype")),
+                )
                 state.write_state(last_text=text)
             except Exception as e:  # noqa: BLE001
                 log.exception("inject failed")
