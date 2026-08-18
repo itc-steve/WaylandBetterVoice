@@ -25,7 +25,6 @@ Item {
   readonly property var main: pluginApi?.mainInstance
   readonly property string mode: main?.mode ?? "offline"
   readonly property string modelName: main?.modelName ?? ""
-  readonly property bool meetingActive: !!(main?.meeting && main.meeting.active) || mode === "meeting"
 
   readonly property string iconColorKey: cfg.iconColor ?? defaults.iconColor ?? "none"
 
@@ -85,44 +84,13 @@ Item {
     }
 
     onRightClicked: {
-      PanelService.showContextMenu(contextMenu, root, root.screen);
+      if (pluginApi)
+        BarService.openPluginSettings(root.screen, pluginApi.manifest);
     }
-  }
 
-  NPopupContextMenu {
-    id: contextMenu
-    model: [
-      {
-        "label": pluginApi?.tr("menu.open_panel"),
-        "action": "panel",
-        "icon": "layout-sidebar"
-      },
-      {
-        "label": root.meetingActive ? pluginApi?.tr("menu.meeting_stop") : pluginApi?.tr("menu.meeting_start"),
-        "action": "meeting",
-        "icon": "player-record"
-      },
-      {
-        "label": pluginApi?.tr("menu.settings"),
-        "action": "settings",
-        "icon": "settings"
-      }
-    ]
-    onTriggered: action => {
-      contextMenu.close();
-      PanelService.closeContextMenu(root.screen);
-      if (action === "panel") {
-        if (pluginApi)
-          pluginApi.openPanel(root.screen, root);
-      } else if (action === "meeting") {
-        if (root.main && root.main.meetingToggle)
-          root.main.meetingToggle();
-        else
-          wbvProc.exec(["wbv", "meeting", "toggle"]);
-      } else if (action === "settings") {
-        if (pluginApi)
-          BarService.openPluginSettings(root.screen, pluginApi.manifest);
-      }
+    onMiddleClicked: {
+      if (pluginApi)
+        pluginApi.openPanel(root.screen, root);
     }
   }
 

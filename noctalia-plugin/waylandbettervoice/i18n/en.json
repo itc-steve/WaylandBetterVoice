@@ -3,12 +3,6 @@
     "tooltip": "WaylandBetterVoice — {mode} · {model}",
     "tooltip_offline": "WaylandBetterVoice — daemon offline"
   },
-  "menu": {
-    "settings": "Widget settings",
-    "meeting_start": "Start meeting",
-    "meeting_stop": "Stop meeting",
-    "open_panel": "Open panel"
-  },
   "panel": {
     "title": "WaylandBetterVoice",
     "daemon": "Daemon",
@@ -29,6 +23,8 @@
     "no_keybinds": "No shortcuts found in your niri config. See packaging/niri-keybinds.kdl."
   },
   "settings": {
+    "electron_mode_label": "Electron app compatibility",
+    "electron_mode_desc": "Off types instantly in normal Wayland apps. Turn on for Electron apps such as VS Code, Discord, and Termius.",
     "overlay_margin_label": "Overlay top margin",
     "overlay_margin_desc": "Pixels below the top of the screen so the overlay clears the bar (default 46).",
     "orb_scale_label": "Orb scale",

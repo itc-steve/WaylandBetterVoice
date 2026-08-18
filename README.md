@@ -98,11 +98,14 @@ If you dictate into Electron apps (Termius, VS Code, Discord), also set up `ydot
 | `Super+Space` | Start / stop listening. While listening, each pause types a sentence. |
 | `Super+Alt+Space` | Start / stop recording a meeting. |
 
-Everything is also available on the CLI and from the bar widget:
+Everything is also available on the CLI and from the bar widget. Right-click the mic
+icon to switch between instant native-app typing and Electron compatibility.
 
 ```bash
 wbv dictate toggle      # or start / stop / cancel
 wbv meeting toggle      # or start / stop
+wbv inject wtype        # instant typing in native Wayland apps
+wbv inject ydotool      # compatible typing in Electron apps
 # `dictate cancel` drops the in-flight utterance instead of typing it. There is no
 # bind for it by default — sentences are typed as soon as you pause, so whatever is
 # already on screen is gone either way. Uncomment the line in the keybind snippet if
@@ -268,10 +271,12 @@ The Arch package ships both the `ydotool.service` user unit and the udev rule th
 needed. Confirm you are in the `input` group with `id -nG | grep input`; if you are not,
 run `sudo usermod -aG input "$USER"` and log out and back in.
 
-Then set `"inject_method": "ydotool"` in the config and restart the daemon:
+Then right-click the bar mic, enable **Electron app compatibility**, and save. The mode
+changes immediately and persists. To switch without the bar widget, run:
 
 ```bash
-systemctl --user restart waylandbettervoice
+wbv inject ydotool   # Electron-compatible
+wbv inject wtype     # instant native-app typing
 ```
 
 ## Troubleshooting

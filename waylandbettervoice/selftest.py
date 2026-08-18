@@ -49,12 +49,13 @@ def test_state_atomic() -> None:
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "state.json"
         # reset module state-ish by writing known fields
-        out = st.write_state(path=path, mode="idle", level=0.0, model_loaded=True, last_text="hi")
+        out = st.write_state(path=path, mode="idle", level=0.0, model_loaded=True, inject_method="ydotool", last_text="hi")
         assert path.is_file()
         assert not path.with_suffix(".tmp").exists()
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["mode"] == "idle"
         assert data["model_loaded"] is True
+        assert data["inject_method"] == "ydotool"
         assert data["last_text"] == "hi"
         assert "since" in data
 
@@ -523,6 +524,58 @@ def test_hf_token_not_leaked_on_redirect() -> None:
     print("  hf token not leaked on redirect: ok")
 
 
+def test_inject_mode_command_persists_and_reloads() -> None:
+    """CLI mode switch preserves config and reloads a running daemon."""
+    import contextlib
+    import io
+    from unittest.mock import call, patch
+    from waylandbettervoice import config as cfg
+    from waylandbettervoice.__main__ import main as cli_main
+
+    original_config_path = cfg.CONFIG_PATH
+    original_state_path = cfg.STATE_PATH
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            cfg.CONFIG_PATH = Path(td) / "config.json"
+            cfg.STATE_PATH = Path(td) / "state.json"
+            cfg.save_config({"n_threads": 3, "inject_method": "wtype"})
+
+            cfg.STATE_PATH.write_text("{}", encoding="utf-8")
+            with patch("waylandbettervoice.__main__.ipc.send", side_effect=[{"ok": True}, {"ok": True}]) as send, contextlib.redirect_stdout(io.StringIO()):
+                assert cli_main(["inject", "ydotool"]) == 0
+            assert send.call_args_list == [call("status"), call("reload")]
+            saved = json.loads(cfg.CONFIG_PATH.read_text(encoding="utf-8"))
+            assert saved["inject_method"] == "ydotool"
+            assert saved["n_threads"] == 3
+
+            cfg.STATE_PATH.unlink()
+            with patch("waylandbettervoice.__main__.ipc.send") as send, contextlib.redirect_stdout(io.StringIO()):
+                assert cli_main(["inject", "clipboard"]) == 0
+            send.assert_not_called()
+            assert json.loads(cfg.CONFIG_PATH.read_text(encoding="utf-8"))["inject_method"] == "clipboard"
+
+            cfg.save_config({"inject_method": "wtype"})
+            cfg.STATE_PATH.write_text("{}", encoding="utf-8")
+            with patch("waylandbettervoice.__main__.ipc.send", side_effect=ConnectionError), contextlib.redirect_stderr(io.StringIO()):
+                assert cli_main(["inject", "ydotool"]) == 1
+            assert json.loads(cfg.CONFIG_PATH.read_text(encoding="utf-8"))["inject_method"] == "wtype"
+
+            broken = '{"n_threads": 3,'
+            cfg.CONFIG_PATH.write_text(broken, encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()):
+                assert cli_main(["inject", "ydotool"]) == 1
+            assert cfg.CONFIG_PATH.read_text(encoding="utf-8") == broken
+
+            cfg.STATE_PATH.unlink()
+            cfg.CONFIG_PATH.write_text("{}", encoding="utf-8")
+            with patch("waylandbettervoice.config.save_config", side_effect=OSError("read-only")), contextlib.redirect_stderr(io.StringIO()):
+                assert cli_main(["inject", "ydotool"]) == 1
+    finally:
+        cfg.CONFIG_PATH = original_config_path
+        cfg.STATE_PATH = original_state_path
+    print("  inject mode command: ok")
+
+
 def test_meeting_capture_targets_playback_stream() -> None:
     """Record sink carrying app audio, not unrelated running hardware; request raw PCM."""
     from unittest.mock import patch
@@ -577,6 +630,7 @@ def main() -> int:
         test_model_missing_error_message,
         test_hf_token_resolution_order,
         test_hf_token_not_leaked_on_redirect,
+        test_inject_mode_command_persists_and_reloads,
         test_meeting_capture_targets_playback_stream,
     ]
     failed = 0

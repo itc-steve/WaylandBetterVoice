@@ -3,5 +3,6 @@
   "orbScale": 1,
   "showOrbWhileTranscribing": true,
   "meetingPillEnabled": false,
-  "iconColor": "none"
+  "iconColor": "none",
+  "electronCompatibility": false
 }

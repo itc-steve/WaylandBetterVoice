@@ -9,6 +9,7 @@ ColumnLayout {
 
   property var cfg: pluginApi?.pluginSettings || ({})
   property var defaults: pluginApi?.manifest?.metadata?.defaultSettings || ({})
+  property var main: pluginApi?.mainInstance
 
   // Edit copies — never write pluginSettings from bindings.
   property real editOverlayTopMargin: cfg.overlayTopMargin ?? defaults.overlayTopMargin ?? 46
@@ -16,8 +17,23 @@ ColumnLayout {
   property bool editShowOrbWhileTranscribing: cfg.showOrbWhileTranscribing ?? defaults.showOrbWhileTranscribing ?? true
   property bool editMeetingPillEnabled: cfg.meetingPillEnabled ?? defaults.meetingPillEnabled ?? true
   property string editIconColor: cfg.iconColor ?? defaults.iconColor ?? "none"
+  property bool editElectronCompatibility: main?.daemonUp
+      ? main.injectMethod === "ydotool"
+      : cfg.electronCompatibility ?? defaults.electronCompatibility ?? false
+  property bool electronCompatibilityDirty: false
 
   spacing: Style.marginL
+
+  NToggle {
+    Layout.fillWidth: true
+    label: pluginApi?.tr("settings.electron_mode_label")
+    description: pluginApi?.tr("settings.electron_mode_desc")
+    checked: root.editElectronCompatibility
+    onToggled: checked => {
+      root.editElectronCompatibility = checked;
+      root.electronCompatibilityDirty = true;
+    }
+  }
 
   NSpinBox {
     Layout.fillWidth: true
@@ -80,11 +96,22 @@ ColumnLayout {
       Logger.e("waylandbettervoice", "Cannot save settings: pluginApi is null");
       return;
     }
-    pluginApi.pluginSettings.overlayTopMargin = Math.round(root.editOverlayTopMargin);
-    pluginApi.pluginSettings.orbScale = root.editOrbScale;
-    pluginApi.pluginSettings.showOrbWhileTranscribing = root.editShowOrbWhileTranscribing;
-    pluginApi.pluginSettings.meetingPillEnabled = root.editMeetingPillEnabled;
-    pluginApi.pluginSettings.iconColor = root.editIconColor;
+    const settings = {
+      "overlayTopMargin": Math.round(root.editOverlayTopMargin),
+      "orbScale": root.editOrbScale,
+      "showOrbWhileTranscribing": root.editShowOrbWhileTranscribing,
+      "meetingPillEnabled": root.editMeetingPillEnabled,
+      "iconColor": root.editIconColor,
+      "electronCompatibility": root.editElectronCompatibility
+    };
+    if (root.electronCompatibilityDirty) {
+      if (root.main?.setInjectMethod)
+        root.main.setInjectMethod(root.editElectronCompatibility ? "ydotool" : "wtype", settings);
+      else
+        Logger.e("waylandbettervoice", "Cannot change injection mode: main instance unavailable");
+      return;
+    }
+    Object.assign(pluginApi.pluginSettings, settings);
     pluginApi.saveSettings();
     Logger.i("waylandbettervoice", "Settings saved");
   }

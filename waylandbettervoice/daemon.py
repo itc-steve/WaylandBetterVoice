@@ -13,7 +13,7 @@ import time
 from typing import Any, Optional
 
 from waylandbettervoice import audio, inject, ipc, state, stt
-from waylandbettervoice.config import LOG_PATH, SOCKET_PATH, load_config, mkdirs
+from waylandbettervoice.config import LOG_PATH, SOCKET_PATH, STATE_PATH, load_config, mkdirs
 
 log = logging.getLogger("wbv.daemon")
 
@@ -394,7 +394,10 @@ def cmd_status(_args: dict | None = None) -> dict:
 def cmd_reload(_args: dict | None = None) -> dict:
     global _config
     _config = load_config()
-    state.write_state(model=_config.get("model", "ggml-large-v3.bin"))
+    state.write_state(
+        model=_config.get("model", "ggml-large-v3.bin"),
+        inject_method=_config.get("inject_method", "wtype"),
+    )
     return {
         "reloaded": True,
         "config": {
@@ -447,6 +450,7 @@ def run(foreground: bool = True) -> int:
         mode="idle",
         model=_config.get("model", "ggml-large-v3.bin"),
         model_loaded=False,
+        inject_method=_config.get("inject_method", "wtype"),
         error=None,
         level=0.0,
         last_text="",
@@ -515,6 +519,9 @@ def run(foreground: bool = True) -> int:
         if _server is not None:
             _server.stop()
             _server = None
-        state.write_state(mode="idle", level=0.0, model_loaded=False)
+        try:
+            STATE_PATH.unlink(missing_ok=True)
+        except OSError as e:
+            log.warning("could not remove stale state file %s: %s", STATE_PATH, e)
         log.info("daemon stopped")
     return 0

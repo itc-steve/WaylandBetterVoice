@@ -20,6 +20,7 @@ _DEFAULT_STATE: dict[str, Any] = {
     "level": 0.0,
     "model": "ggml-large-v3.bin",
     "model_loaded": False,
+    "inject_method": "wtype",
     "meeting": {"active": False, "file": None, "speakers": 0, "elapsed": 0},
     "last_text": "",
     "error": None,

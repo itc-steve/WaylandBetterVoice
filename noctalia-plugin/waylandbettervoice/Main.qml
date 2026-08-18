@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.UI
 
 
 Item {
@@ -14,6 +15,7 @@ Item {
   property real level: 0.0
   property string modelName: ""
   property bool modelLoaded: false
+  property string injectMethod: "wtype"
   property var meeting: ({
                            "active": false,
                            "file": null,
@@ -26,6 +28,8 @@ Item {
   property bool daemonUp: false
   property bool stateLoaded: false
   property real lastStateReadMs: 0
+  property string pendingInjectMethod: ""
+  property var pendingPluginSettings: null
 
   // Keybinds actually configured for wbv, scraped from the live niri config.
   // niri has no IPC for binds, so the config tree is the only source of truth.
@@ -53,6 +57,7 @@ Item {
     level = 0.0;
     modelName = "";
     modelLoaded = false;
+    injectMethod = "wtype";
     meeting = {
       "active": false,
       "file": null,
@@ -75,6 +80,7 @@ Item {
     level = typeof obj.level === "number" ? obj.level : 0.0;
     modelName = obj.model || "";
     modelLoaded = !!obj.model_loaded;
+    injectMethod = obj.inject_method || "wtype";
     meeting = obj.meeting || {
       "active": false,
       "file": null,
@@ -114,6 +120,17 @@ Item {
 
   function meetingToggle() {
     runWbv(["meeting", "toggle"]);
+  }
+
+  function setInjectMethod(method, settings) {
+    if (injectModeProcess.running) {
+      ToastService.showError("WaylandBetterVoice", "Injection mode change already in progress");
+      return;
+    }
+    pendingInjectMethod = method;
+    pendingPluginSettings = settings;
+    // /bin/sh always starts, so missing wbv becomes exit 127 instead of a silent spawn failure.
+    injectModeProcess.exec(["/bin/sh", "-c", "exec \"$@\"", "sh", "wbv", "inject", method]);
   }
 
   function openMeetingsFolder() {
@@ -171,6 +188,27 @@ Item {
   Process {
     id: wbvProcess
     // one-shot CLI runner; stdout ignored
+  }
+
+  Process {
+    id: injectModeProcess
+    stderr: StdioCollector {
+      id: injectModeError
+    }
+    onExited: function (exitCode) {
+      if (exitCode !== 0) {
+        const error = injectModeError.text.trim() || "wbv inject failed";
+        Logger.e("waylandbettervoice", error);
+        ToastService.showError("WaylandBetterVoice", error);
+      } else {
+        Object.assign(root.pluginApi.pluginSettings, root.pendingPluginSettings);
+        root.pluginApi.saveSettings();
+        root.injectMethod = root.pendingInjectMethod;
+        Logger.i("waylandbettervoice", "Settings saved");
+      }
+      root.pendingInjectMethod = "";
+      root.pendingPluginSettings = null;
+    }
   }
 
   // Scrape `wbv` binds out of the niri config so the panel shows what is really

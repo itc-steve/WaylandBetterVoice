@@ -1,7 +1,7 @@
 {
   "id": "waylandbettervoice",
   "name": "WaylandBetterVoice",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "minNoctaliaVersion": "4.4.3",
   "author": "WaylandBetterVoice",
   "license": "MIT",
@@ -28,7 +28,8 @@
       "orbScale": 1.0,
       "showOrbWhileTranscribing": true,
       "meetingPillEnabled": true,
-      "iconColor": "none"
+      "iconColor": "none",
+      "electronCompatibility": false
     }
   }
 }

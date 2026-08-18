@@ -38,6 +38,48 @@ def _client(cmd: str, args: dict | None = None) -> int:
     return 0
 
 
+def _cmd_inject(args: argparse.Namespace) -> int:
+    """Persist injection method and reload daemon when it is running."""
+    from waylandbettervoice.config import CONFIG_PATH, STATE_PATH, save_config
+
+    cfg = {}
+    if CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"cannot update invalid config {CONFIG_PATH}: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(cfg, dict):
+            print(f"cannot update invalid config {CONFIG_PATH}: expected JSON object", file=sys.stderr)
+            return 1
+    daemon_up = STATE_PATH.exists()
+    if daemon_up:
+        try:
+            status = ipc.send("status")
+        except ConnectionError as e:
+            print(f"daemon is starting or unreachable; retry: {e}", file=sys.stderr)
+            return 1
+        if not status.get("ok", False):
+            print(status.get("error") or "daemon status failed", file=sys.stderr)
+            return 1
+    cfg["inject_method"] = args.method
+    try:
+        save_config(cfg)
+    except OSError as e:
+        print(f"cannot update config {CONFIG_PATH}: {e}", file=sys.stderr)
+        return 1
+    try:
+        resp = ipc.send("reload") if daemon_up else None
+    except ConnectionError as e:
+        print(f"config saved but daemon reload failed: {e}", file=sys.stderr)
+        return 1
+    if resp is not None and not resp.get("ok", False):
+        print(resp.get("error") or "daemon reload failed", file=sys.stderr)
+        return 1
+    print(f"injection mode: {args.method}")
+    return 0
+
+
 def _cmd_model(args: argparse.Namespace) -> int:
     """Local model ops — no daemon / IPC required."""
     from waylandbettervoice import models as M
@@ -100,6 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="show daemon status")
     p_status.add_argument("--json", action="store_true", help="raw JSON")
 
+    p_inject = sub.add_parser("inject", help="select text injection mode")
+    p_inject.add_argument("method", choices=["wtype", "ydotool", "clipboard"])
+
     sub.add_parser("quit", help="shut down daemon")
 
     p_model = sub.add_parser("model", help="list / download whisper models (no daemon needed)")
@@ -159,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "quit":
         return _client("quit")
+
+    if args.command == "inject":
+        return _cmd_inject(args)
 
     if args.command == "model":
         return _cmd_model(args)
