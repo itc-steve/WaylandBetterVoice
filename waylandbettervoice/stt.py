@@ -1,6 +1,7 @@
-"""pywhispercpp model wrapper — load once, keep VRAM-resident."""
+"""pywhispercpp model wrapper with synchronized model ownership."""
 from __future__ import annotations
 
+import gc
 import logging
 import threading
 from pathlib import Path
@@ -67,11 +68,39 @@ def load_model(config: dict) -> Model:
 # whisper.cpp's CUDA scheduler is NOT re-entrant. Two concurrent whisper_full calls
 # abort the process (GGML_ASSERT(!sched->is_alloc) -> SIGABRT, verified with a core
 # dump when a meeting's mic and system threads transcribed at the same time).
-# Every path into the model goes through this lock.
+# This module owns the model so lookup, inference, and unload share one lock.
 _model_lock = threading.Lock()
+_model: Model | None = None
 
 
-def transcribe(model: Model, pcm_int16_bytes: bytes) -> str:
+def install_model(model: Model) -> None:
+    """Install the daemon's sole model reference."""
+    global _model
+    with _model_lock:
+        if _model is not None:
+            raise RuntimeError("model already loaded")
+        _model = model
+
+
+def is_model_loaded() -> bool:
+    with _model_lock:
+        return _model is not None
+
+
+def unload_model() -> bool:
+    """Drop the sole model reference after active inference finishes."""
+    global _model
+    with _model_lock:
+        model = _model
+        _model = None
+        if model is None:
+            return False
+        del model  # Model.__del__ calls whisper_free(), releasing CUDA allocations.
+        gc.collect()  # run __del__ now if a pybind cycle delayed it
+        return True
+
+
+def transcribe(pcm_int16_bytes: bytes) -> str:
     """Convert int16 PCM → float32 [-1,1], run model.transcribe, join segment text.
 
     Serialized: concurrent calls queue instead of crashing the daemon.
@@ -84,7 +113,11 @@ def transcribe(model: Model, pcm_int16_bytes: bytes) -> str:
     # ponytail: whole-utterance buffer in RAM; stream/VAD if dictation_max_seconds grows huge
     audio = np.frombuffer(pcm_int16_bytes[:n], dtype=np.int16).astype(np.float32) / 32768.0
     with _model_lock:
+        model = _model
+        if model is None:
+            return ""
         segments = model.transcribe(audio)
+        del model
     parts = []
     for seg in segments or []:
         t = (seg.text or "").strip()

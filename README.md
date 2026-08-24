@@ -113,6 +113,8 @@ wbv inject ydotool      # compatible typing in Electron apps
 wbv status --json
 wbv model list          # what is downloaded, what is available
 wbv model download <name>
+wbv model load          # load configured STT model into VRAM
+wbv model unload        # release STT model VRAM
 ```
 
 Models come from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)

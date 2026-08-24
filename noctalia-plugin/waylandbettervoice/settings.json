@@ -4,5 +4,5 @@
   "showOrbWhileTranscribing": true,
   "meetingPillEnabled": false,
   "iconColor": "none",
-  "electronCompatibility": false
+  "electronCompatibility": true
 }

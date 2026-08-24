@@ -18,7 +18,6 @@ from waylandbettervoice.config import LOG_PATH, SOCKET_PATH, STATE_PATH, load_co
 log = logging.getLogger("wbv.daemon")
 
 _config: dict = {}
-_model = None
 _capture: Optional[audio.Capture] = None
 _capture_thread: Optional[threading.Thread] = None
 _endpointer: Optional[audio.Endpointer] = None
@@ -29,6 +28,8 @@ _mode_lock = threading.Lock()
 # Serializes start/stop/cancel so a double-tapped hotkey cannot spawn two captures.
 _session_lock = threading.RLock()
 _utt_q: queue.Queue = queue.Queue()
+_pending_lock = threading.Lock()
+_pending_utterances = 0
 _worker_thread: Optional[threading.Thread] = None
 _server: Optional[ipc.Server] = None
 _quit_event = threading.Event()
@@ -94,13 +95,29 @@ def _refresh_listen_mode() -> None:
 
 
 def _enqueue_utterance(pcm: bytes) -> None:
+    global _pending_utterances
     if not pcm:
         return
     # ponytail: flat RMS gate — whisper hallucinates on silence; promote to config if needed
     if audio.rms_level(pcm) < _SILENCE_RMS:
         log.info("discarding near-silent utterance (%d bytes)", len(pcm))
         return
-    _utt_q.put(pcm)
+    with _pending_lock:
+        _pending_utterances += 1
+        _utt_q.put(pcm)
+
+
+def _complete_utterance() -> None:
+    global _pending_utterances
+    with _pending_lock:
+        if _pending_utterances <= 0:
+            raise RuntimeError("utterance accounting underflow")
+        _pending_utterances -= 1
+
+
+def _pending_count() -> int:
+    with _pending_lock:
+        return _pending_utterances
 
 
 def _make_endpointer() -> audio.Endpointer:
@@ -126,7 +143,7 @@ def _worker_loop() -> None:
         _worker_busy = True
         _refresh_listen_mode()
         try:
-            text = stt.transcribe(_model, pcm) if _model is not None else ""
+            text = stt.transcribe(pcm)
         except Exception as e:  # noqa: BLE001
             log.exception("transcribe failed")
             if _listening.is_set():
@@ -136,6 +153,7 @@ def _worker_loop() -> None:
             else:
                 _worker_busy = False
                 _set_error(f"transcribe failed: {e}")
+            _complete_utterance()
             continue
         if text:
             try:
@@ -149,6 +167,7 @@ def _worker_loop() -> None:
                 log.exception("inject failed")
                 _notify(f"inject failed: {e}")
         _worker_busy = False
+        _complete_utterance()
         if _listening.is_set():
             _refresh_listen_mode()
         # if session ended mid-work, stop path owns final idle write after drain
@@ -221,13 +240,22 @@ def _drain_worker(timeout: float = 30.0) -> None:
     """Wait until utterance queue empty and worker not busy."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _utt_q.empty() and not _worker_busy:
+        if _pending_count() == 0:
             return
         time.sleep(0.02)
 
 
 def _listen_busy_modes() -> frozenset[str]:
     return frozenset({"listening", "dictating", "transcribing"})
+
+
+def _model_unavailable_error() -> str:
+    want = _config.get("model", "ggml-large-v3.bin")
+    try:
+        stt.resolve_model_path(want)
+    except stt.ModelMissingError as e:
+        return str(e)
+    return f"model unloaded ({want}) — run: wbv model load"
 
 
 def dictate_start(_args: dict | None = None) -> dict:
@@ -242,17 +270,8 @@ def dictate_start(_args: dict | None = None) -> dict:
             return {"mode": mode, "note": "already listening"}
         if mode == "meeting":
             return {"ok": False, "error": "meeting active — stop meeting first"}
-        if _model is None:
-            from waylandbettervoice.models import short_name_for
-
-            want = _config.get("model", "ggml-large-v3.bin")
-            return {
-                "ok": False,
-                "error": (
-                    f"model not loaded ({want}). "
-                    f"Run: wbv model download {short_name_for(want)}"
-                ),
-            }
+        if not stt.is_model_loaded():
+            return {"ok": False, "error": _model_unavailable_error()}
 
         ep = _make_endpointer()
         try:
@@ -296,7 +315,11 @@ def dictate_cancel(_args: dict | None = None) -> dict:
     # drop queued utterances without processing
     try:
         while True:
-            _utt_q.get_nowait()
+            item = _utt_q.get_nowait()
+            if item is None:
+                _utt_q.put(None)
+                break
+            _complete_utterance()
     except queue.Empty:
         pass
     state.write_state(mode="idle", level=0.0, error=None)
@@ -333,16 +356,18 @@ def meeting_start(_args: dict | None = None) -> dict:
         st = state.get_state()
         if _session_active() or st.get("mode") in _listen_busy_modes():
             return {"ok": False, "error": "dictation active — stop first"}
-    try:
-        mod = _meeting_mod()
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"meeting module unavailable: {e}"}
-    try:
-        result = mod.start(_config, _on_meeting_state)
-        return result if isinstance(result, dict) else {"ok": True, "data": result}
-    except Exception as e:  # noqa: BLE001
-        log.exception("meeting.start failed")
-        return {"ok": False, "error": str(e)}
+        if not stt.is_model_loaded():
+            return {"ok": False, "error": _model_unavailable_error()}
+        try:
+            mod = _meeting_mod()
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"meeting module unavailable: {e}"}
+        try:
+            result = mod.start(_config, _on_meeting_state)
+            return result if isinstance(result, dict) else {"ok": True, "data": result}
+        except Exception as e:  # noqa: BLE001
+            log.exception("meeting.start failed")
+            return {"ok": False, "error": str(e)}
 
 
 def meeting_stop(_args: dict | None = None) -> dict:
@@ -391,6 +416,56 @@ def cmd_status(_args: dict | None = None) -> dict:
     return st
 
 
+def cmd_load(_args: dict | None = None) -> dict:
+    """Load the configured STT model while the daemon is idle."""
+    with _session_lock:
+        current = state.get_state()
+        mode = current.get("mode")
+        if _session_active() or mode in _listen_busy_modes() or mode == "meeting":
+            return {"ok": False, "error": "stop dictation or meeting before loading the model"}
+        if _pending_count() > 0:
+            return {"ok": False, "error": "transcription still active — try again when idle"}
+        if stt.is_model_loaded():
+            return {"model_loaded": True, "note": "already loaded"}
+        try:
+            model = stt.load_model(_config)
+            stt.install_model(model)
+            del model
+        except stt.ModelMissingError as e:
+            message = str(e)
+            log.error("%s", message)
+            state.write_state(model_loaded=False, mode="error", error=message)
+            _notify(message.splitlines()[0])
+            return {"ok": False, "error": message}
+        except Exception as e:  # noqa: BLE001
+            message = f"model load failed: {e}"
+            log.exception("model load failed")
+            state.write_state(model_loaded=False, mode="error", error=message)
+            _notify(message)
+            return {"ok": False, "error": message}
+        state.write_state(model_loaded=True, mode="idle", error=None)
+        log.info("whisper model loaded")
+        return {"model_loaded": True, "loaded": True}
+
+
+def cmd_unload(_args: dict | None = None) -> dict:
+    """Release the idle STT model's VRAM allocations."""
+    with _session_lock:
+        current = state.get_state()
+        mode = current.get("mode")
+        if _session_active() or mode in _listen_busy_modes() or mode == "meeting":
+            return {"ok": False, "error": "stop dictation or meeting before unloading the model"}
+        if _pending_count() > 0:
+            return {"ok": False, "error": "transcription still active — try again when idle"}
+        unloaded = stt.unload_model()
+        if not unloaded:
+            state.write_state(model_loaded=False)
+            return {"model_loaded": False, "note": "already unloaded"}
+        state.write_state(model_loaded=False, error=None)
+        log.info("whisper model unloaded")
+        return {"model_loaded": False, "unloaded": True}
+
+
 def cmd_reload(_args: dict | None = None) -> dict:
     global _config
     _config = load_config()
@@ -417,10 +492,11 @@ def cmd_reload(_args: dict | None = None) -> dict:
 
 
 def cmd_quit(_args: dict | None = None) -> dict:
-    _quit_event.set()
-    if _session_active():
-        dictate_cancel()
-    return {"quitting": True}
+    with _session_lock:
+        _quit_event.set()
+        if _session_active():
+            dictate_cancel()
+        return {"quitting": True}
 
 
 def _build_dispatch() -> dict:
@@ -433,6 +509,8 @@ def _build_dispatch() -> dict:
         "meeting.start": meeting_start,
         "meeting.stop": meeting_stop,
         "status": cmd_status,
+        "model.load": cmd_load,
+        "model.unload": cmd_unload,
         "reload": cmd_reload,
         "quit": cmd_quit,
     }
@@ -440,7 +518,7 @@ def _build_dispatch() -> dict:
 
 def run(foreground: bool = True) -> int:
     """Start daemon: mkdirs, load config+model, serve IPC until quit."""
-    global _config, _model, _server, _worker_thread
+    global _config, _server, _worker_thread
     _setup_logging()
     mkdirs()
     _config = load_config()
@@ -457,22 +535,7 @@ def run(foreground: bool = True) -> int:
         meeting={"active": False, "file": None, "speakers": 0, "elapsed": 0},
     )
 
-    try:
-        _model = stt.load_model(_config)
-        state.write_state(model_loaded=True)
-    except stt.ModelMissingError as e:
-        # actionable — no silent auto-download (a multi-GB surprise is hostile)
-        msg = str(e)
-        log.error("%s", msg)
-        state.write_state(model_loaded=False, mode="error", error=msg)
-        _notify(msg.splitlines()[0])
-        _model = None
-    except Exception as e:  # noqa: BLE001
-        log.exception("model load failed")
-        state.write_state(model_loaded=False, mode="error", error=f"model load failed: {e}")
-        _notify(f"model load failed: {e}")
-        # still serve IPC so status/quit work; dictate will refuse
-        _model = None
+    cmd_load()  # failures stay visible in state; IPC still starts for status/retry/quit
 
     _worker_thread = threading.Thread(target=_worker_loop, name="wbv-stt-worker", daemon=True)
     _worker_thread.start()

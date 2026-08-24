@@ -11,7 +11,7 @@ from waylandbettervoice import ipc
 
 # Stopping a long meeting finalizes transcripts and mixes the wav; draining queued
 # dictation utterances waits on whisper. Both blow past the 5 s default.
-_SLOW_COMMANDS = {"meeting.stop", "meeting.toggle", "dictate.stop", "dictate.toggle", "quit"}
+_SLOW_COMMANDS = {"meeting.stop", "meeting.toggle", "dictate.stop", "dictate.toggle", "model.load", "model.unload", "quit"}
 
 
 def _client(cmd: str, args: dict | None = None) -> int:
@@ -81,7 +81,10 @@ def _cmd_inject(args: argparse.Namespace) -> int:
 
 
 def _cmd_model(args: argparse.Namespace) -> int:
-    """Local model ops — no daemon / IPC required."""
+    """Manage local model files or the daemon's loaded model."""
+    if args.model_action in ("load", "unload"):
+        return _client(f"model.{args.model_action}")
+
     from waylandbettervoice import models as M
     from waylandbettervoice.config import MODEL_DIR, mkdirs
 
@@ -147,11 +150,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("quit", help="shut down daemon")
 
-    p_model = sub.add_parser("model", help="list / download whisper models (no daemon needed)")
+    p_model = sub.add_parser("model", help="manage whisper models")
     p_model.add_argument(
         "model_action",
-        choices=["list", "download", "path"],
-        help="list known models, download one, or print MODEL_DIR",
+        choices=["list", "download", "path", "load", "unload"],
+        help="list/download models, print MODEL_DIR, or load/unload daemon VRAM",
     )
     p_model.add_argument("name", nargs="?", help="model name for download (e.g. large-v3)")
     p_model.add_argument(

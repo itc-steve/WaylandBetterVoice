@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.UI
 import qs.Widgets
 
 Item {
@@ -15,7 +16,7 @@ Item {
   property real contentPreferredWidth: 380 * Style.uiScaleRatio
   // Grows with the number of shortcuts found, so the transcript box does not have to
   // absorb the slack and shove the buttons to the bottom edge.
-  property real contentPreferredHeight: (398 + root.keybinds.length * 30) * Style.uiScaleRatio
+  property real contentPreferredHeight: (482 + root.keybinds.length * 30) * Style.uiScaleRatio
 
   readonly property var main: pluginApi?.mainInstance
   readonly property var keybinds: main?.keybinds ?? []
@@ -252,6 +253,7 @@ Item {
         NButton {
           text: root.meetingActive ? pluginApi?.tr("panel.meeting_stop") : pluginApi?.tr("panel.meeting_start")
           icon: root.meetingActive ? "player-stop" : "player-record"
+          enabled: root.daemonUp && (root.modelLoaded || root.meetingActive)
           backgroundColor: root.meetingActive ? Color.mError : Color.mPrimary
           onClicked: root.runWbv(["meeting", "toggle"])
         }
@@ -291,6 +293,17 @@ Item {
         }
       }
 
+      NButton {
+        Layout.fillWidth: true
+        text: pluginApi?.tr(root.modelLoaded ? "panel.model_unload" : "panel.model_load")
+        icon: root.modelLoaded ? "memory" : "database-import"
+        outlined: true
+        backgroundColor: root.modelLoaded ? Color.mError : Color.mPrimary
+        tooltipText: pluginApi?.tr(root.modelLoaded ? "panel.model_unload_tooltip" : "panel.model_load_tooltip")
+        enabled: root.daemonUp && (root.mode === "idle" || (!root.modelLoaded && root.mode === "error")) && !root.meetingActive && !wbvProc.running
+        onClicked: root.runWbv(["model", root.modelLoaded ? "unload" : "load"])
+      }
+
       // Error row
       NBox {
         Layout.fillWidth: true
@@ -323,6 +336,13 @@ Item {
 
   Process {
     id: wbvProc
+    stderr: StdioCollector {
+      id: wbvErr
+    }
+    onExited: function (exitCode) {
+      if (exitCode !== 0)
+        ToastService.showError("WaylandBetterVoice", wbvErr.text.trim() || "wbv command failed");
+    }
   }
   Process {
     id: openFolderProc

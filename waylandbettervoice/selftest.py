@@ -576,6 +576,152 @@ def test_inject_mode_command_persists_and_reloads() -> None:
     print("  inject mode command: ok")
 
 
+def test_stt_unload_waits_for_transcription() -> None:
+    """Unload waits for active inference, then drops the model's final reference."""
+    import weakref
+    from waylandbettervoice import stt
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class Segment:
+        text = "hello"
+
+    class FakeModel:
+        def transcribe(self, _audio):
+            started.set()
+            assert release.wait(2)
+            return [Segment()]
+
+    stt.unload_model()
+    model = FakeModel()
+    released = weakref.ref(model)
+    stt.install_model(model)
+    model = None
+    result: list[str] = []
+    transcriber = threading.Thread(target=lambda: result.append(stt.transcribe(b"\0\0" * 320)))
+    transcriber.start()
+    assert started.wait(2)
+    unloader = threading.Thread(target=stt.unload_model)
+    unloader.start()
+    time.sleep(0.05)
+    assert unloader.is_alive(), "unload must wait for inference lock"
+    release.set()
+    transcriber.join(2)
+    unloader.join(2)
+    assert result == ["hello"]
+    assert released() is None
+    assert stt.is_model_loaded() is False
+    print("  stt synchronized unload: ok")
+
+
+def test_daemon_unload_releases_idle_model() -> None:
+    """Idle unload drops daemon model reference and publishes unloaded state."""
+    import weakref
+    from unittest.mock import patch
+    from waylandbettervoice import daemon, stt
+
+    class FakeModel:
+        pass
+
+    stt.unload_model()
+    try:
+        model = FakeModel()
+        released = weakref.ref(model)
+        stt.install_model(model)
+        model = None
+        with patch.object(daemon.state, "get_state", return_value={"mode": "listening"}):
+            blocked = daemon.cmd_unload()
+        assert blocked.get("ok") is False
+        assert stt.is_model_loaded() is True
+        assert released() is not None
+
+        daemon._enqueue_utterance(_fake_chunk(0.05))
+        dequeued = daemon._utt_q.get_nowait()
+        assert dequeued
+        with patch.object(daemon.state, "get_state", return_value={"mode": "idle"}):
+            handoff = daemon.cmd_unload()
+        assert handoff.get("ok") is False, "dequeued work must still block unload"
+        daemon._complete_utterance()
+
+        with patch.object(daemon.state, "get_state", return_value={"mode": "idle"}), patch.object(
+            daemon.state, "write_state"
+        ) as write_state:
+            result = daemon.cmd_unload()
+        assert result == {"model_loaded": False, "unloaded": True}
+        assert stt.is_model_loaded() is False
+        assert released() is None
+        write_state.assert_called_once_with(model_loaded=False, error=None)
+
+        with patch.object(daemon.state, "get_state", return_value={"mode": "idle"}), patch.object(
+            stt, "resolve_model_path", return_value=Path("/model.bin")
+        ):
+            unavailable = daemon.dictate_start()
+        assert "wbv model load" in unavailable["error"]
+        assert "download" not in unavailable["error"]
+
+        daemon._utt_q.put(None)
+        with patch.object(daemon, "_stop_capture_hw", return_value=[]), patch.object(
+            daemon.state, "write_state"
+        ):
+            daemon.dictate_cancel()
+        assert daemon._utt_q.get_nowait() is None, "cancel must preserve the shutdown sentinel"
+    finally:
+        stt.unload_model()
+    print("  daemon model unload: ok")
+
+
+def test_daemon_load_installs_configured_model() -> None:
+    """Idle load installs the configured model and publishes ready state."""
+    from unittest.mock import patch
+    from waylandbettervoice import daemon, stt
+
+    class FakeModel:
+        pass
+
+    stt.unload_model()
+    try:
+        with patch.object(daemon.state, "get_state", return_value={"mode": "listening"}), patch.object(
+            stt, "load_model", return_value=FakeModel()
+        ) as load:
+            blocked = daemon.cmd_load()
+        assert blocked.get("ok") is False
+        load.assert_not_called()
+
+        model = FakeModel()
+        with patch.object(daemon.state, "get_state", return_value={"mode": "idle"}), patch.object(
+            stt, "load_model", return_value=model
+        ) as load, patch.object(daemon.state, "write_state") as write_state:
+            result = daemon.cmd_load()
+        assert result == {"model_loaded": True, "loaded": True}
+        assert stt.is_model_loaded() is True
+        load.assert_called_once_with(daemon._config)
+        write_state.assert_called_once_with(model_loaded=True, mode="idle", error=None)
+    finally:
+        stt.unload_model()
+    print("  daemon model load: ok")
+
+
+def test_model_lifecycle_cli_dispatch() -> None:
+    """CLI model load/unload reach their daemon IPC handlers."""
+    import contextlib
+    import io
+    from unittest.mock import patch
+    from waylandbettervoice import daemon
+    from waylandbettervoice.__main__ import main as cli_main
+
+    dispatch = daemon._build_dispatch()
+    assert dispatch["model.load"] is daemon.cmd_load
+    assert dispatch["model.unload"] is daemon.cmd_unload
+    for action in ("load", "unload"):
+        with patch("waylandbettervoice.__main__.ipc.send", return_value={"ok": True}) as send, contextlib.redirect_stdout(
+            io.StringIO()
+        ):
+            assert cli_main(["model", action]) == 0
+        send.assert_called_once_with(f"model.{action}", {}, timeout=180.0)
+    print("  model lifecycle CLI dispatch: ok")
+
+
 def test_meeting_capture_targets_playback_stream() -> None:
     """Record sink carrying app audio, not unrelated running hardware; request raw PCM."""
     from unittest.mock import patch
@@ -631,6 +777,10 @@ def main() -> int:
         test_hf_token_resolution_order,
         test_hf_token_not_leaked_on_redirect,
         test_inject_mode_command_persists_and_reloads,
+        test_stt_unload_waits_for_transcription,
+        test_daemon_unload_releases_idle_model,
+        test_daemon_load_installs_configured_model,
+        test_model_lifecycle_cli_dispatch,
         test_meeting_capture_targets_playback_stream,
     ]
     failed = 0

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import threading
 import time
 import wave
@@ -147,11 +146,7 @@ class _Diarizer:
 def _transcribe(pcm: bytes) -> str:
     """Reuse the daemon's VRAM-resident model; never load a second one."""
     try:
-        daemon = sys.modules.get("waylandbettervoice.daemon")
-        model = getattr(daemon, "_model", None)
-        if model is None:
-            raise RuntimeError("daemon model not loaded")
-        return str(stt.transcribe(model, pcm)).strip()
+        return str(stt.transcribe(pcm)).strip()
     except Exception as error:
         _LOG.warning("meeting transcription failed: %s", error)
         return ""
