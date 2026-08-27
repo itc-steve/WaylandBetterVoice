@@ -40,7 +40,7 @@ announce "Building package in ${script_dir}"
   makepkg --cleanbuild --clean --force
 )
 
-package_file=$(find "${script_dir}" -maxdepth 1 -type f -name 'waylandbettervoice-*.pkg.tar.zst' -print -quit)
+package_file=$(cd "${script_dir}" && makepkg --packagelist | head -n 1)
 if [[ -z ${package_file} ]]; then
   echo "Package build completed without a waylandbettervoice package." >&2
   exit 1

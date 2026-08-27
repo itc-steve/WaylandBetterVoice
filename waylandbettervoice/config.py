@@ -47,7 +47,8 @@ DEFAULTS: dict = {
 
 
 def mkdirs() -> None:
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    RUNTIME_DIR.chmod(0o700)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     SPEAKER_MODEL_DIR.mkdir(parents=True, exist_ok=True)

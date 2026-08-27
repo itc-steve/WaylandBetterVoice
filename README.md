@@ -17,8 +17,8 @@ records meetings and writes a speaker-labelled transcript, tagging each remote
 participant separately even when they all arrive on one audio stream.
 
 Whisper `large-v3` is loaded into VRAM when your session starts and stays resident, so
-there is no model load between you pressing the key and speaking. Nothing is ever sent
-anywhere: no API keys, no accounts, no network calls.
+there is no model load between you pressing the key and speaking. Dictation and
+transcription stay local: no API keys, accounts, telemetry, or network calls.
 
 ---
 
@@ -186,9 +186,10 @@ are configurable in the plugin settings.
 
 ## Privacy
 
-No network code exists in this project. The model runs on your GPU, audio never leaves
-memory except as files you explicitly record, and there is no telemetry, no account, and
-no cloud fallback. You can verify it with `ss -tunap | grep wbv` while dictating.
+Dictation and transcription make no network calls. The only network operation is an
+explicit `wbv model download` from Hugging Face. The model runs on your GPU, audio never
+leaves memory except as files you explicitly record, and there is no telemetry, account,
+or cloud fallback. You can verify it with `ss -tunap | grep wbv` while dictating.
 
 ## How it works
 

@@ -1,6 +1,6 @@
 # WaylandBetterVoice — Noctalia plugin
 
-Bar widget + panel + top overlay for the [WaylandBetterVoice](https://github.com/) dictation daemon.
+Bar widget + panel + top overlay for the [WaylandBetterVoice](https://github.com/itc-steve/WaylandBetterVoice) dictation daemon.
 Targets Noctalia shell **4.7.7** / quickshell **0.0.12**, niri, strict Wayland.
 
 ## Install path

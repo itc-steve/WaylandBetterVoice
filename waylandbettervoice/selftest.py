@@ -414,6 +414,7 @@ def test_xdg_path_resolution() -> None:
             assert cfg.MEETING_DIR.is_dir()
             assert cfg.CONFIG_DIR.is_dir()
             assert cfg.RUNTIME_DIR.is_dir()
+            assert os.stat(cfg.RUNTIME_DIR).st_mode & 0o777 == 0o700
         finally:
             for k, v in old.items():
                 if v is None:
@@ -722,6 +723,47 @@ def test_model_lifecycle_cli_dispatch() -> None:
     print("  model lifecycle CLI dispatch: ok")
 
 
+def test_meeting_start_failure_does_not_deadlock() -> None:
+    """Failed capture startup cleans up and returns instead of self-deadlocking."""
+    from unittest.mock import patch
+    from waylandbettervoice import meeting
+
+    class FailedMeeting:
+        def __init__(self, _settings, _on_state):
+            self.worker_acquired_lock = threading.Event()
+            self.worker = threading.Thread(target=self._worker, daemon=True)
+
+        def _worker(self):
+            with meeting._lock:
+                self.worker_acquired_lock.set()
+
+        def start(self):
+            self.worker.start()
+            assert self.worker_acquired_lock.wait(0.2), "startup worker blocked on meeting lock"
+            raise RuntimeError("capture unavailable")
+
+        def stop(self):
+            self.worker.join()
+
+    finished = threading.Event()
+
+    def fail_start():
+        try:
+            meeting.start({}, lambda _state: None)
+        except RuntimeError:
+            pass
+        finally:
+            finished.set()
+
+    with patch.object(meeting, "_Meeting", FailedMeeting):
+        thread = threading.Thread(target=fail_start, daemon=True)
+        thread.start()
+        assert finished.wait(1), "meeting.start deadlocked during failure cleanup"
+        thread.join()
+    assert meeting.is_active() is False
+    print("  meeting start failure cleanup: ok")
+
+
 def test_meeting_capture_targets_playback_stream() -> None:
     """Record sink carrying app audio, not unrelated running hardware; request raw PCM."""
     from unittest.mock import patch
@@ -781,6 +823,7 @@ def main() -> int:
         test_daemon_unload_releases_idle_model,
         test_daemon_load_installs_configured_model,
         test_model_lifecycle_cli_dispatch,
+        test_meeting_start_failure_does_not_deadlock,
         test_meeting_capture_targets_playback_stream,
     ]
     failed = 0

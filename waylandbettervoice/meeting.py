@@ -20,6 +20,7 @@ _RATE = 16000
 _SAMPLE_BYTES = 2
 _LOG = logging.getLogger(__name__)
 _lock = threading.Lock()
+_session_lock = threading.Lock()
 _session: _Meeting | None = None
 
 
@@ -308,30 +309,39 @@ class _Meeting:
 def start(settings: Any, on_state: Any) -> None:
     """Start one meeting; raises RuntimeError when one is already active."""
     global _session
-    with _lock:
-        if _session is not None:
-            raise RuntimeError("meeting already active")
-        _session = _Meeting(settings, on_state)
+    with _session_lock:
+        with _lock:
+            if _session is not None:
+                raise RuntimeError("meeting already active")
+            session = _session = _Meeting(settings, on_state)
         try:
-            _session.start()
+            session.start()
         except Exception:
-            _session.stop()
-            _session = None
+            try:
+                session.stop()
+            except Exception as error:
+                _LOG.warning("meeting startup cleanup failed: %s", error)
+            finally:
+                with _lock:
+                    if _session is session:
+                        _session = None
             raise
 
 
 def stop() -> dict[str, Any]:
     """Stop capture and block until transcript and mix are written."""
     global _session
-    with _lock:
-        session = _session
-    if session is None:
-        return {"active": False, "file": None, "speakers": 0, "elapsed": 0.0}
-    result = session.stop()
-    with _lock:
-        if _session is session:
-            _session = None
-    return result
+    with _session_lock:
+        with _lock:
+            session = _session
+        if session is None:
+            return {"active": False, "file": None, "speakers": 0, "elapsed": 0.0}
+        try:
+            return session.stop()
+        finally:
+            with _lock:
+                if _session is session:
+                    _session = None
 
 
 def is_active() -> bool:
