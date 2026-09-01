@@ -68,7 +68,7 @@ Observed (2026-08-01): `WAITING` → `RELOAD` → `WAITING` → `RELOAD` → `RE
 |---|---|
 | **Main.qml** | Watches and recovers `state.json`; owns overlay, IPC `dictate`/`meeting`, CLI helpers |
 | **Orb.qml** | `PanelWindow` overlay — dim slow orbs while listening, level-reactive bright orbs while dictating, calm rotating orbs while transcribing, dim meeting pill |
-| **BarWidget.qml** | Mic capsule; tint: offline muted, idle configured, listening tertiary, dictating primary, transcribing secondary, meeting/error error; LMB toggles dictation, RMB opens settings, MMB opens panel |
+| **BarWidget.qml** | Mic capsule; tint: offline muted, idle configured, listening tertiary, dictating primary, transcribing secondary, meeting/error error; LMB toggles dictation, RMB opens panel, MMB opens settings |
 | **Panel.qml** | Status, last transcript (selectable + copy), meeting control, open meetings folder |
 | **Settings.qml** | Native/Electron injection mode, overlay margin, orb scale, show-while-transcribing, meeting pill, bar icon color |
 

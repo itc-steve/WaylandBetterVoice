@@ -85,12 +85,12 @@ Item {
 
     onRightClicked: {
       if (pluginApi)
-        BarService.openPluginSettings(root.screen, pluginApi.manifest);
+        pluginApi.openPanel(root.screen, root);
     }
 
     onMiddleClicked: {
       if (pluginApi)
-        pluginApi.openPanel(root.screen, root);
+        BarService.openPluginSettings(root.screen, pluginApi.manifest);
     }
   }
 

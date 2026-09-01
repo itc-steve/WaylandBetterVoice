@@ -99,7 +99,7 @@ If you dictate into Electron apps (Termius, VS Code, Discord), also set up `ydot
 | `Super+Alt+Space` | Start / stop recording a meeting. |
 
 Everything is also available on the CLI and from the bar widget. Right-click the mic
-icon to switch between instant native-app typing and Electron compatibility.
+icon for the app panel; middle-click for Noctalia settings (native vs Electron typing).
 
 ```bash
 wbv dictate toggle      # or start / stop / cancel
@@ -274,7 +274,7 @@ The Arch package ships both the `ydotool.service` user unit and the udev rule th
 needed. Confirm you are in the `input` group with `id -nG | grep input`; if you are not,
 run `sudo usermod -aG input "$USER"` and log out and back in.
 
-Then right-click the bar mic, enable **Electron app compatibility**, and save. The mode
+Then middle-click the bar mic, enable **Electron app compatibility**, and save. The mode
 changes immediately and persists. To switch without the bar widget, run:
 
 ```bash
