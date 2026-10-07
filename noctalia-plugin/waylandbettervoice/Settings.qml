@@ -111,7 +111,7 @@ ColumnLayout {
         Logger.e("waylandbettervoice", "Cannot change injection mode: main instance unavailable");
       return;
     }
-    Object.assign(pluginApi.pluginSettings, settings);
+    pluginApi.pluginSettings = Object.assign({}, pluginApi.pluginSettings, settings);
     pluginApi.saveSettings();
     Logger.i("waylandbettervoice", "Settings saved");
   }

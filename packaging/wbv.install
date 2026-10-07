@@ -5,7 +5,7 @@ WaylandBetterVoice installed.
 Next steps (run as your normal desktop user):
   1. Download model: wbv model download large-v3
   2. Enable service: systemctl --user enable --now waylandbettervoice.service
-  3. Link plugin: mkdir -p ~/.config/noctalia/plugins && ln -s /usr/share/waylandbettervoice/noctalia-plugin ~/.config/noctalia/plugins/waylandbettervoice
+  3. Copy plugin (user-owned): mkdir -p ~/.config/noctalia/plugins/waylandbettervoice && cp -r /usr/share/waylandbettervoice/noctalia-plugin/. ~/.config/noctalia/plugins/waylandbettervoice/
   4. Copy /usr/share/waylandbettervoice/niri-keybinds.kdl to ~/.config/niri/cfg/waylandbettervoice.kdl,
      then add include "./cfg/waylandbettervoice.kdl" to your niri config.
 EOF

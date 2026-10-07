@@ -6,12 +6,14 @@ inject_method (config):
               they decode the raw keycodes against the system layout and you
               get garbage like "22345" for "Hello". Fine for native terminals.
   ydotool   — kernel uinput, so every app sees ordinary key events. Needs
-              ydotoold running and access to /dev/uinput.
+              ydotoold running and access to /dev/uinput. ASCII only; Unicode
+              goes to the clipboard rather than its unsafe byte-to-keycode map.
   clipboard — wl-copy only; paste manually.
 """
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 
@@ -19,19 +21,26 @@ log = logging.getLogger("wbv.inject")
 
 
 def type_text(text: str, trailing_space: bool = True, method: str = "wtype") -> None:
-    """Inject text with the configured method. On failure → wl-copy + notify-send."""
+    """Inject literal, single-line dictation. On failure → wl-copy + notify-send."""
     if text is None:
         return
-    s = text
+    # Newlines/tabs become Return/Tab keypresses, not harmless formatting.
+    # Normalize whitespace, then drop remaining control keys (NUL, Esc, BS, etc.).
+    s = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", " ".join(text.split())).strip()
     if trailing_space and s and not s.endswith(" "):
         s = s + " "
     if not s:
         return
 
-    # "--" so leading dashes in text are not parsed as flags
+    if method == "ydotool" and not s.isascii():
+        log.warning("ydotool cannot safely type Unicode — using clipboard")
+        _clipboard_fallback(s)
+        return
+
+    # "--" protects leading dashes; ydotool otherwise interprets literal \\n as Enter.
     argv = {
         "wtype": lambda exe: [exe, "--", s],
-        "ydotool": lambda exe: [exe, "type", "--", s],
+        "ydotool": lambda exe: [exe, "type", "--escape=0", "--", s],
     }.get(method)
 
     if argv:

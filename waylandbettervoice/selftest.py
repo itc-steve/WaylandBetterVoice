@@ -99,7 +99,12 @@ def test_ipc_roundtrip() -> None:
         def boom(args: dict) -> dict:
             raise RuntimeError("deliberate")
 
-        srv = Server(path=sock, dispatch={"echo": echo, "boom": boom, "status": lambda a: {"mode": "idle"}})
+        srv = Server(path=sock, dispatch={
+            "echo": echo,
+            "boom": boom,
+            "slow": lambda _a: (time.sleep(0.1) or {}),
+            "status": lambda a: {"mode": "idle"},
+        })
         srv.start()
         try:
             # give thread a moment
@@ -129,6 +134,12 @@ def test_ipc_roundtrip() -> None:
             resp4 = send("boom", path=sock)
             assert resp4["ok"] is False
             assert "deliberate" in (resp4.get("error") or "")
+
+            try:
+                send("slow", path=sock, timeout=0.01)
+                raise AssertionError("expected timeout")
+            except TimeoutError as e:
+                assert "timed out" in str(e)
         finally:
             srv.stop()
 
@@ -414,7 +425,8 @@ def test_xdg_path_resolution() -> None:
             assert cfg.MEETING_DIR.is_dir()
             assert cfg.CONFIG_DIR.is_dir()
             assert cfg.RUNTIME_DIR.is_dir()
-            assert os.stat(cfg.RUNTIME_DIR).st_mode & 0o777 == 0o700
+            for private_dir in (cfg.RUNTIME_DIR, cfg.DATA_DIR, cfg.MODEL_DIR, cfg.MEETING_DIR, cfg.CONFIG_DIR):
+                assert os.stat(private_dir).st_mode & 0o777 == 0o700, private_dir
         finally:
             for k, v in old.items():
                 if v is None:
@@ -523,6 +535,69 @@ def test_hf_token_not_leaked_on_redirect() -> None:
         away = handler.redirect_request(req, _FP(), 302, "Found", {}, foreign)
         assert auth_of(away) is None, f"token leaked to {foreign}"
     print("  hf token not leaked on redirect: ok")
+
+
+def test_injection_never_types_control_keys() -> None:
+    """Dictation is literal single-line text, never Enter/Tab/Escape/Backspace."""
+    import subprocess
+    from unittest.mock import patch
+    from waylandbettervoice import inject
+
+    cases = [
+        ("hello", "hello"),
+        ("first\nsecond\r\nthird\rfourth\tlast\n", "first second third fourth last"),
+        ("  repeated   spaces  ", "repeated spaces"),
+        ("one\v two\fthree\u0085four\u2028five\u2029six", "one two three four five six"),
+        ("safe\x00\x08\x1b\x7f\x80 text", "safe text"),
+        (r"--flag C:\new\test \n \t \x0a", r"--flag C:\new\test \n \t \x0a"),
+        (None, ""),
+        ("", ""),
+        (" \r\n\t\x00\x08\x1b\x7f", ""),
+    ]
+    for method in ("wtype", "ydotool", "clipboard"):
+        for trailing_space in (False, True):
+            for text, expected in cases:
+                with patch.object(inject.shutil, "which", side_effect=lambda name: name), patch.object(
+                    inject.subprocess, "run"
+                ) as run:
+                    inject.type_text(text, trailing_space=trailing_space, method=method)
+                if not expected:
+                    run.assert_not_called()
+                    continue
+                expected += " " if trailing_space else ""
+                if method == "clipboard":
+                    assert run.call_args_list[0].args[0] == ["wl-copy"]
+                    assert run.call_args_list[0].kwargs["input"] == expected.encode()
+                else:
+                    argv = run.call_args.args[0]
+                    assert argv[-2:] == ["--", expected], (method, repr(text), argv)
+                    if method == "ydotool":
+                        assert "--escape=0" in argv, "ydotool must not decode literal \\n as Enter"
+                    assert run.call_count == 1
+
+    # ydotool's byte-indexed ASCII map cannot safely type UTF-8. Preserve it via clipboard.
+    with patch.object(inject.shutil, "which", side_effect=lambda name: name), patch.object(
+        inject.subprocess, "run"
+    ) as run:
+        inject.type_text("Café — it's fine.", method="ydotool")
+    assert run.call_args_list[0].args[0] == ["wl-copy"]
+    assert run.call_args_list[0].kwargs["input"] == "Café — it's fine. ".encode()
+
+    with patch.object(inject.shutil, "which", side_effect=lambda name: name), patch.object(
+        inject.subprocess, "run"
+    ) as run:
+        inject.type_text("Café — it's fine.", trailing_space=False, method="wtype")
+    assert run.call_args.args[0] == ["wtype", "--", "Café — it's fine."]
+
+    for method in ("wtype", "ydotool"):
+        for failure in (subprocess.CalledProcessError(1, method), subprocess.TimeoutExpired(method, 30), OSError()):
+            with patch.object(inject.shutil, "which", side_effect=lambda name: name), patch.object(
+                inject.subprocess, "run", side_effect=[failure, None, None]
+            ) as run:
+                inject.type_text("first\nsecond\tlast\n", method=method)
+            assert run.call_args_list[1].args[0] == ["wl-copy"]
+            assert run.call_args_list[1].kwargs["input"] == b"first second last "
+    print("  literal single-line injection: ok")
 
 
 def test_inject_mode_command_persists_and_reloads() -> None:
@@ -723,6 +798,138 @@ def test_model_lifecycle_cli_dispatch() -> None:
     print("  model lifecycle CLI dispatch: ok")
 
 
+def test_capture_eof_sets_persistent_error() -> None:
+    """A dead pw-record stream must stop listening and leave a visible error."""
+    from unittest.mock import patch
+    from waylandbettervoice import daemon
+
+    class EndedCapture:
+        stopped = False
+
+        def read_chunk(self):
+            return b""
+
+        def stop(self):
+            self.stopped = True
+
+    capture = EndedCapture()
+    original_config = daemon._config
+    daemon._capture = capture
+    daemon._endpointer = object()
+    daemon._config = {"listen_max_minutes": 0, "notify_on_error": False}
+    daemon._listening.set()
+    try:
+        with patch.object(daemon.time, "sleep"), patch.object(daemon.state, "write_state") as write_state:
+            daemon._capture_loop()
+        assert capture.stopped is True
+        assert daemon._listening.is_set() is False
+        write_state.assert_called_once_with(
+            mode="error", error="capture stream ended unexpectedly", level=0.0
+        )
+    finally:
+        daemon._capture = None
+        daemon._endpointer = None
+        daemon._config = original_config
+        daemon._listening.clear()
+    print("  capture EOF error: ok")
+
+
+def test_dictate_cancel_drops_active_transcription() -> None:
+    """Cancel must suppress text already dequeued by the transcription worker."""
+    from unittest.mock import patch
+    from waylandbettervoice import daemon
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def transcribe(_pcm):
+        started.set()
+        assert release.wait(2)
+        return "must not type"
+
+    worker = threading.Thread(target=daemon._worker_loop, daemon=True)
+    with patch.object(daemon.stt, "transcribe", side_effect=transcribe), patch.object(
+        daemon.inject, "type_text"
+    ) as type_text, patch.object(daemon, "_stop_capture_hw", return_value=[]), patch.object(
+        daemon.state, "write_state"
+    ):
+        daemon._enqueue_utterance(_fake_chunk(0.05))
+        worker.start()
+        assert started.wait(2)
+        daemon.dictate_cancel()
+        release.set()
+        daemon._utt_q.put(None)
+        worker.join(2)
+
+    assert not worker.is_alive()
+    type_text.assert_not_called()
+    assert daemon._pending_count() == 0
+    print("  dictate cancel active transcription: ok")
+
+
+def test_meeting_capture_end_finalizes_session() -> None:
+    """Capture EOF must finalize files and clear the active meeting session."""
+    from unittest.mock import patch
+    from waylandbettervoice import meeting
+
+    class EndedCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def read_chunk(self):
+            return b""
+
+        def stop(self):
+            pass
+
+    class NoDiarizer:
+        speakers = 0
+
+        def __init__(self, _settings):
+            pass
+
+    states = []
+    with tempfile.TemporaryDirectory() as td, patch.object(
+        meeting.config, "MEETING_DIR", Path(td)
+    ), patch.object(meeting.audio, "Capture", EndedCapture), patch.object(
+        meeting, "_Diarizer", NoDiarizer
+    ):
+        meeting.start({}, states.append)
+        try:
+            deadline = time.monotonic() + 2
+            while meeting.is_active() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert meeting.is_active() is False, "capture EOF left a zombie meeting"
+            directories = list(Path(td).iterdir())
+            assert len(directories) == 1
+            assert (directories[0] / "mix.wav").is_file()
+            assert not list(directories[0].glob(".*.raw"))
+            assert states[-1]["mode"] == "idle"
+            assert states[-1]["meeting"]["active"] is False
+        finally:
+            meeting.stop()
+    failed_states = []
+    with tempfile.TemporaryDirectory() as td, patch.object(
+        meeting.config, "MEETING_DIR", Path(td)
+    ), patch.object(meeting.audio, "Capture", EndedCapture), patch.object(
+        meeting, "_Diarizer", NoDiarizer
+    ), patch.object(meeting._Meeting, "_write_mix", side_effect=ValueError("bad pcm")):
+        meeting.start({}, failed_states.append)
+        try:
+            deadline = time.monotonic() + 2
+            while meeting.is_active() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert meeting.is_active() is False, "failed finalization left a zombie meeting"
+            assert failed_states[-1]["mode"] == "error"
+            assert "bad pcm" in failed_states[-1]["error"]
+        finally:
+            meeting.stop()
+    print("  meeting capture end finalization: ok")
+
+
 def test_meeting_start_failure_does_not_deadlock() -> None:
     """Failed capture startup cleans up and returns instead of self-deadlocking."""
     from unittest.mock import patch
@@ -818,11 +1025,15 @@ def main() -> int:
         test_model_missing_error_message,
         test_hf_token_resolution_order,
         test_hf_token_not_leaked_on_redirect,
+        test_injection_never_types_control_keys,
         test_inject_mode_command_persists_and_reloads,
         test_stt_unload_waits_for_transcription,
         test_daemon_unload_releases_idle_model,
         test_daemon_load_installs_configured_model,
         test_model_lifecycle_cli_dispatch,
+        test_capture_eof_sets_persistent_error,
+        test_dictate_cancel_drops_active_transcription,
+        test_meeting_capture_end_finalizes_session,
         test_meeting_start_failure_does_not_deadlock,
         test_meeting_capture_targets_playback_stream,
     ]

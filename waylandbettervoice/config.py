@@ -47,13 +47,16 @@ DEFAULTS: dict = {
 
 
 def mkdirs() -> None:
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    RUNTIME_DIR.chmod(0o700)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    SPEAKER_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    MEETING_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    for directory in (
+        RUNTIME_DIR,
+        DATA_DIR,
+        MODEL_DIR,
+        SPEAKER_MODEL_DIR,
+        MEETING_DIR,
+        CONFIG_DIR,
+    ):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
 
 
 def load_config() -> dict:
@@ -77,3 +80,4 @@ def save_config(cfg: dict) -> None:
         json.dump(cfg, f, indent=2)
         f.write("\n")
     os.replace(tmp, CONFIG_PATH)
+    CONFIG_PATH.chmod(0o600)

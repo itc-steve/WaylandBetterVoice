@@ -36,6 +36,11 @@ _quit_event = threading.Event()
 
 # whisper hallucinates ("Thank you.") on pure silence — keep per-utterance gate
 _SILENCE_RMS = 0.004
+# Bumped on cancel; a worker that dequeued before the bump drops its in-flight result.
+_cancel_seq = 0
+# Persistent read_chunk() EOF while still listening means the capture process died.
+# ~0.5 s of 20 ms frames (reads are faster once the pipe is closed) before failing.
+_EOF_GRACE_READS = 25
 
 
 def _setup_logging() -> None:
@@ -68,10 +73,11 @@ def _notify(msg: str) -> None:
 
 
 def _set_error(err: str) -> None:
+    # Error persists in state until the next successful action clears it
+    # (dictate start/stop/cancel, model load/unload, meeting stop all write error=None).
     log.error("%s", err)
     state.write_state(mode="error", error=err, level=0.0)
     _notify(err)
-    state.write_state(mode="idle", error=None, level=0.0)
 
 
 def _session_active() -> bool:
@@ -104,7 +110,7 @@ def _enqueue_utterance(pcm: bytes) -> None:
         return
     with _pending_lock:
         _pending_utterances += 1
-        _utt_q.put(pcm)
+        _utt_q.put((_cancel_seq, pcm))
 
 
 def _complete_utterance() -> None:
@@ -139,7 +145,7 @@ def _worker_loop() -> None:
         item = _utt_q.get()
         if item is None:
             break
-        pcm = item
+        gen, pcm = item
         _worker_busy = True
         _refresh_listen_mode()
         try:
@@ -153,6 +159,12 @@ def _worker_loop() -> None:
             else:
                 _worker_busy = False
                 _set_error(f"transcribe failed: {e}")
+            _complete_utterance()
+            continue
+        if _cancel_seq != gen:
+            # cancelled while this utterance was in flight — drop result, type nothing
+            log.info("discarding transcription cancelled mid-flight")
+            _worker_busy = False
             _complete_utterance()
             continue
         if text:
@@ -182,6 +194,7 @@ def _capture_loop() -> None:
         return
     max_min = float(_config.get("listen_max_minutes", 30))
     deadline = time.monotonic() + max_min * 60.0 if max_min > 0 else float("inf")
+    empty_reads = 0
     try:
         while _listening.is_set():
             if time.monotonic() >= deadline:
@@ -193,8 +206,16 @@ def _capture_loop() -> None:
             if not chunk:
                 if not _listening.is_set():
                     break
+                # persistent EOF = capture process died; fail instead of spinning
+                empty_reads += 1
+                if empty_reads >= _EOF_GRACE_READS:
+                    cap.stop()
+                    _listening.clear()
+                    _set_error("capture stream ended unexpectedly")
+                    break
                 time.sleep(0.01)
                 continue
+            empty_reads = 0
             lvl = audio.rms_level(chunk)
             state.write_state(level=lvl)
             finished = ep.feed(lvl, chunk)
@@ -310,7 +331,9 @@ def dictate_stop(_args: dict | None = None) -> dict:
 
 
 def dictate_cancel(_args: dict | None = None) -> dict:
+    global _cancel_seq
     with _session_lock:
+        _cancel_seq += 1  # invalidate transcriptions the worker already dequeued
         _stop_capture_hw()
     # drop queued utterances without processing
     try:
@@ -516,7 +539,7 @@ def _build_dispatch() -> dict:
     }
 
 
-def run(foreground: bool = True) -> int:
+def run() -> int:
     """Start daemon: mkdirs, load config+model, serve IPC until quit."""
     global _config, _server, _worker_thread
     _setup_logging()

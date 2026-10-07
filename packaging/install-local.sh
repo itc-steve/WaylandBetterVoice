@@ -15,7 +15,7 @@ esac
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 plugin_source=/usr/share/waylandbettervoice/noctalia-plugin
-plugin_link="${HOME}/.config/noctalia/plugins/waylandbettervoice"
+plugin_dest="${HOME}/.config/noctalia/plugins/waylandbettervoice"
 model_dir="${HOME}/.local/share/waylandbettervoice/models"
 niri_source=/usr/share/waylandbettervoice/niri-keybinds.kdl
 niri_snippet="${HOME}/.config/niri/cfg/waylandbettervoice.kdl"
@@ -27,7 +27,7 @@ announce() {
 if "${check}"; then
   announce "Would build package: (cd ${script_dir} && makepkg --cleanbuild --clean --force)"
   announce "Would install resulting waylandbettervoice package with: sudo pacman -U <package>"
-  announce "Would create ${HOME}/.config/noctalia/plugins and symlink ${plugin_link} -> ${plugin_source}"
+  announce "Would create ${HOME}/.config/noctalia/plugins and copy ${plugin_source} to ${plugin_dest}"
   announce "Would create ${model_dir}; if empty, run: wbv model download large-v3"
   announce "Would create ${HOME}/.config/niri/cfg and copy ${niri_source} to ${niri_snippet} if absent"
   printf '%s\n' "Would not enable service or edit niri config."
@@ -48,16 +48,32 @@ fi
 announce "Installing ${package_file} with pacman"
 sudo pacman -U "${package_file}"
 
-if [[ -L ${plugin_link} ]] && [[ $(readlink -f -- "${plugin_link}") == ${plugin_source} ]]; then
-  announce "Plugin link already correct: ${plugin_link}"
-elif [[ -e ${plugin_link} || -L ${plugin_link} ]]; then
-  echo "Refusing to replace existing plugin path: ${plugin_link}" >&2
+if [[ -L ${plugin_dest} ]]; then
+  if [[ $(readlink -f -- "${plugin_dest}") == ${plugin_source} ]]; then
+    announce "Replacing package symlink with user-owned copy: ${plugin_dest}"
+    rm -- "${plugin_dest}"
+  else
+    echo "Refusing to replace existing plugin path: ${plugin_dest}" >&2
+    exit 1
+  fi
+elif [[ -e ${plugin_dest} && ! -d ${plugin_dest} ]]; then
+  echo "Refusing to replace existing plugin path: ${plugin_dest}" >&2
   exit 1
+fi
+settings_backup=""
+if [[ -f ${plugin_dest}/settings.json ]]; then
+  settings_backup=$(mktemp)
+  cp -- "${plugin_dest}/settings.json" "${settings_backup}"
+  trap 'rm -f -- "${settings_backup}"' EXIT
+fi
+announce "Creating plugin directory: ${HOME}/.config/noctalia/plugins"
+mkdir -p "${plugin_dest}"
+announce "Copying plugin: ${plugin_source} -> ${plugin_dest}"
+cp -r -- "${plugin_source}/." "${plugin_dest}/"
+if [[ -n ${settings_backup} ]]; then
+  install -m600 "${settings_backup}" "${plugin_dest}/settings.json"
 else
-  announce "Creating plugin directory: ${HOME}/.config/noctalia/plugins"
-  mkdir -p "${HOME}/.config/noctalia/plugins"
-  announce "Creating plugin symlink: ${plugin_link} -> ${plugin_source}"
-  ln -s "${plugin_source}" "${plugin_link}"
+  chmod 600 "${plugin_dest}/settings.json"
 fi
 
 announce "Creating model directory: ${model_dir}"

@@ -87,11 +87,6 @@ def _sink_with_inputs() -> Optional[str]:
     return None
 
 
-def resolve_default_sink_monitor() -> str:
-    """Back-compat alias. Returns the sink node name; use Capture(..., monitor=True)."""
-    return resolve_default_sink()
-
-
 def rms_level(pcm_bytes: bytes) -> float:
     """RMS of int16 PCM → 0..1 (clamped). Empty → 0.0."""
     if not pcm_bytes:

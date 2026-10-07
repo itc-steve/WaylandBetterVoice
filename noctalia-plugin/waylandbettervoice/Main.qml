@@ -133,9 +133,15 @@ Item {
     injectModeProcess.exec(["/bin/sh", "-c", "exec \"$@\"", "sh", "wbv", "inject", method]);
   }
 
+  function meetingsDir() {
+    var data = Quickshell.env("XDG_DATA_HOME");
+    if (!data || !data.length)
+      data = (Quickshell.env("HOME") || "") + "/.local/share";
+    return data + "/waylandbettervoice/meetings";
+  }
+
   function openMeetingsFolder() {
-    var home = Quickshell.env("HOME") || "";
-    openFolderProcess.exec(["xdg-open", home + "/.local/share/waylandbettervoice/meetings"]);
+    openFolderProcess.exec(["xdg-open", meetingsDir()]);
   }
 
   function copyLastText() {
@@ -187,7 +193,16 @@ Item {
 
   Process {
     id: wbvProcess
-    // one-shot CLI runner; stdout ignored
+    stderr: StdioCollector {
+      id: wbvError
+    }
+    onExited: function (exitCode) {
+      if (exitCode !== 0) {
+        const error = wbvError.text.trim() || "wbv command failed";
+        Logger.e("waylandbettervoice", error);
+        ToastService.showError("WaylandBetterVoice", error);
+      }
+    }
   }
 
   Process {
@@ -201,7 +216,7 @@ Item {
         Logger.e("waylandbettervoice", error);
         ToastService.showError("WaylandBetterVoice", error);
       } else {
-        Object.assign(root.pluginApi.pluginSettings, root.pendingPluginSettings);
+        root.pluginApi.pluginSettings = Object.assign({}, root.pluginApi.pluginSettings, root.pendingPluginSettings);
         root.pluginApi.saveSettings();
         root.injectMethod = root.pendingInjectMethod;
         Logger.i("waylandbettervoice", "Settings saved");

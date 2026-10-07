@@ -144,6 +144,8 @@ def send(cmd: str, args: dict | None = None, path: Path | None = None, timeout: 
                 if not chunk:
                     break
                 buf += chunk
+    except socket.timeout as e:
+        raise TimeoutError(f"timed out waiting for daemon reply ({sock_path})") from e
     except (ConnectionRefusedError, FileNotFoundError, OSError) as e:
         raise ConnectionError(
             f"daemon not running or socket stale ({sock_path}): {e}. Start with: wbv daemon"

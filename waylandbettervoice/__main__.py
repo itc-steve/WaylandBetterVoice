@@ -11,7 +11,7 @@ from waylandbettervoice import ipc
 
 # Stopping a long meeting finalizes transcripts and mixes the wav; draining queued
 # dictation utterances waits on whisper. Both blow past the 5 s default.
-_SLOW_COMMANDS = {"meeting.stop", "meeting.toggle", "dictate.stop", "dictate.toggle", "model.load", "model.unload", "quit"}
+_SLOW_COMMANDS = {"meeting.start", "meeting.stop", "meeting.toggle", "dictate.stop", "dictate.toggle", "model.load", "model.unload", "quit"}
 
 
 def _client(cmd: str, args: dict | None = None) -> int:
@@ -123,8 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_daemon = sub.add_parser("daemon", help="start daemon")
-    p_daemon.add_argument("--foreground", action="store_true", help="run in foreground (systemd)")
+    sub.add_parser("daemon", help="start daemon")
 
     p_dictate = sub.add_parser("dictate", help="control dictation")
     p_dictate.add_argument(
@@ -169,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "daemon":
         from waylandbettervoice.daemon import run
-        return run(foreground=args.foreground)
+        return run()
 
     if args.command == "dictate":
         return _client(f"dictate.{args.action}")

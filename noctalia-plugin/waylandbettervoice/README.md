@@ -11,11 +11,13 @@ Packaging installs the plugin tree to:
 /usr/share/waylandbettervoice/noctalia-plugin/
 ```
 
-`install-local.sh` (repo packaging) then symlinks it into:
+`install-local.sh` (repo packaging) then copies it into a user-owned directory:
 
 ```
 ~/.config/noctalia/plugins/waylandbettervoice
 ```
+
+Do not symlink the packaged tree from `/usr/share`. A copy can be updated in place; an existing non-package path (dev symlink, extra file) is left alone.
 
 Manual (dev) symlink from the repo:
 
@@ -49,18 +51,6 @@ IPC smoke (from another terminal while shell is running):
 qs ipc call plugin:waylandbettervoice dictate
 qs ipc call plugin:waylandbettervoice meeting
 ```
-
-## FileView recovery harness
-
-This reproduces boot order safely: start with target absent, then create it after `qs -p` starts. `watchChanges` alone misses this creation; timer calls `reload()` until `RECOVERED` prints.
-
-```bash
-rm -f "$XDG_RUNTIME_DIR/wbv-fileview-recovery.json"
-(sleep 2; printf recovered >"$XDG_RUNTIME_DIR/wbv-fileview-recovery.json") &
-timeout 6 qs -p FileViewRecovery.qml
-```
-
-Observed (2026-08-01): `WAITING` → `RELOAD` → `WAITING` → `RELOAD` → `RECOVERED recovered` (exit 124 is `timeout` ending the intentionally persistent harness).
 
 ## Behaviour
 

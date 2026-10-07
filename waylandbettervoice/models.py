@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from waylandbettervoice.config import MODEL_DIR, mkdirs
+from waylandbettervoice.config import MODEL_DIR
 
 # Upstream: https://huggingface.co/ggerganov/whisper.cpp
 _HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
@@ -129,19 +129,6 @@ def short_name_for(filename: str) -> str:
     if s.endswith(".bin"):
         s = s[:-4]
     return s or filename
-
-
-def model_path(name: str) -> Path:
-    """Path where a known (or raw filename) model would live under MODEL_DIR."""
-    try:
-        return MODEL_DIR / resolve_known(name).filename
-    except ModelError:
-        return MODEL_DIR / name
-
-
-def is_present(m: KnownModel, directory: Path | None = None) -> bool:
-    p = (directory or MODEL_DIR) / m.filename
-    return p.is_file() and p.stat().st_size > 0
 
 
 def sweep_partials(directory: Path | None = None) -> list[Path]:
@@ -345,8 +332,3 @@ def _unlink_quiet(p: Path) -> None:
             p.unlink()
     except OSError:
         pass
-
-
-def ensure_model_dir() -> Path:
-    mkdirs()
-    return MODEL_DIR

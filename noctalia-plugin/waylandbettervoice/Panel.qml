@@ -219,6 +219,8 @@ Item {
             width: textFlick.width
             readOnly: true
             selectByMouse: true
+            selectByKeyboard: true
+            activeFocusOnTab: true
             wrapMode: TextEdit.Wrap
             color: Color.mOnSurface
             selectedTextColor: Color.mOnPrimary
@@ -287,8 +289,10 @@ Item {
           if (main && main.openMeetingsFolder)
             main.openMeetingsFolder();
           else {
-            var home = Quickshell.env("HOME") || "";
-            openFolderProc.exec(["xdg-open", home + "/.local/share/waylandbettervoice/meetings"]);
+            var data = Quickshell.env("XDG_DATA_HOME");
+            if (!data || !data.length)
+              data = (Quickshell.env("HOME") || "") + "/.local/share";
+            openFolderProc.exec(["xdg-open", data + "/waylandbettervoice/meetings"]);
           }
         }
       }

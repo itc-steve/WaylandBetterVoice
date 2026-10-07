@@ -77,9 +77,10 @@ systemctl --user enable --now waylandbettervoice.service
 #      include "./cfg/waylandbettervoice.kdl"
 niri validate
 
-# 4. overlay (optional, needs Noctalia)
-ln -s /usr/share/waylandbettervoice/noctalia-plugin \
-      ~/.config/noctalia/plugins/waylandbettervoice
+# 4. overlay (optional, needs Noctalia) — user-owned copy, not a symlink
+mkdir -p ~/.config/noctalia/plugins/waylandbettervoice
+cp -r /usr/share/waylandbettervoice/noctalia-plugin/. \
+      ~/.config/noctalia/plugins/waylandbettervoice/
 ```
 
 Enable the plugin in Noctalia's settings, then add the **WaylandBetterVoice** widget to
@@ -249,10 +250,14 @@ are cut short or never trigger.
 `inject_method` picks how transcribed text reaches the focused window. Any method that
 fails falls back to the clipboard plus a notification, so text is never lost.
 
+Dictation is inserted as a single line: line breaks and tabs become spaces, and other
+control characters are removed so they cannot press Enter or move focus. Literal
+backslash sequences such as `\n` stay literal. Meeting transcript formatting is unchanged.
+
 | Method | Needs | Works in | Notes |
 |---|---|---|---|
 | `wtype` (default) | `wtype` | Native Wayland apps | No daemon, lowest latency. **Produces garbage in Electron apps** — see below |
-| `ydotool` | `ydotool` + `ydotoold` running | Everything, including Electron | Kernel `uinput`, so apps see ordinary key events |
+| `ydotool` | `ydotool` + `ydotoold` running | Everything, including Electron | Kernel `uinput`; ASCII only. Non-ASCII text is copied for manual paste because its byte-to-keycode map cannot safely type UTF-8 |
 | `clipboard` | `wl-clipboard` | Everything | Copies only; you paste manually |
 
 **Why Electron apps get garbage with `wtype`.** `wtype` uses the Wayland
@@ -261,6 +266,11 @@ keycodes in it. Electron/xterm.js apps (Termius, VS Code, Discord) ignore that k
 and decode the raw keycodes against the *system* layout instead, so `Hello` arrives as
 something like `22345`. `ydotool` goes through the kernel and produces real key events,
 which every app reads correctly.
+
+Chromium-based browser terminals can have the same problem, including Roamgate in
+Brave: a wrong keycode can act like Enter and submit a message even without a newline
+in the dictation. Use `wbv inject ydotool` for those too; removing line breaks alone
+does not fix a misread keymap.
 
 To use `ydotool`:
 

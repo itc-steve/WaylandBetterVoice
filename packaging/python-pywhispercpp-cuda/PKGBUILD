@@ -1,8 +1,8 @@
-# Maintainer: goodroot <hyprwhspr@goodroot.ca>
+# Maintainer: WaylandBetterVoice
 
 pkgname=python-pywhispercpp-cuda
 pkgver=1.4.0
-pkgrel=11
+pkgrel=12
 pkgdesc="Python bindings for whisper.cpp with CUDA support (NVIDIA GPU)"
 arch=('x86_64')
 url="https://github.com/Absadiki/pywhispercpp"
@@ -33,7 +33,7 @@ optdepends=(
   'python-webrtcvad: run VAD-based examples'
   'python-pyqt5: run GUI example'
 )
-provides=('python-pywhispercpp')
+provides=("python-pywhispercpp=${pkgver}")
 conflicts=('python-pywhispercpp' 'python-pywhispercpp-cpu' 'python-pywhispercpp-rocm')
 source=("git+https://github.com/Absadiki/pywhispercpp.git#commit=4ab96165f84e8eb579077dfc3d0476fa5606affe")
 sha256sums=('SKIP')
@@ -41,133 +41,79 @@ sha256sums=('SKIP')
 prepare() {
   cd "$srcdir/pywhispercpp"
   git submodule update --init --recursive
-
-  # Fix CMake Python interpreter detection: use system Python instead of isolated env
-  # The isolated build environment's Python can't be executed by CMake
-  python << 'EOF'
-import re
-_system_python = "/usr/bin/python"  # System Python path
-with open("setup.py", "r") as f:
-    content = f.read()
-# Replace sys.executable with system Python path
-content = re.sub(
-    r'f"-DPYTHON_EXECUTABLE=\{sys\.executable\}"',
-    f'f"-DPYTHON_EXECUTABLE={_system_python}"',
-    content
-)
-with open("setup.py", "w") as f:
-    f.write(content)
-EOF
 }
 
 build() {
   cd "$srcdir/pywhispercpp"
   # Set CUDA environment variables for GPU acceleration
   export GGML_CUDA=ON
+  export PYTHONNOUSERSITE=1
   export PATH="/opt/cuda/bin:$PATH"
   export CUDACXX="${CUDACXX:-/opt/cuda/bin/nvcc}"
 
-  # Detect CUDA version and set architectures accordingly
-  # CUDA 13.0+ only supports 7.5+ (removed Pascal 6.0, Volta 7.0)
-  # CUDA 12.x supports 6.0+ (Pascal through Hopper)
-  local cuda_version
-  cuda_version=$("${CUDACXX:-nvcc}" --version | grep -oP 'release \K[0-9]+\.[0-9]+' | head -1 || echo "13.0")
-  local cuda_major
-  cuda_major=$(echo "$cuda_version" | cut -d. -f1)
-
-  # This machine's RTX PRO 6000 Blackwell reports compute capability 12.0.
+  # This local package targets the RTX PRO 6000 Blackwell (compute capability 12.0).
   local cuda_archs="120"
 
-  # Force CMake to use system Python (patch sets PYTHON_EXECUTABLE, but FindPython still searches PATH)
+  # Force CMake to use system Python; FindPython still searches PATH without this.
   export CMAKE_ARGS="-DPYTHON_EXECUTABLE=/usr/bin/python -DPython3_EXECUTABLE=/usr/bin/python -DCMAKE_CUDA_ARCHITECTURES=$cuda_archs"
-  python -m build --wheel
+  python -m build --wheel --no-isolation
 }
 
 package() {
   cd "$srcdir/pywhispercpp"
-
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-
-
-  # Figure out where site-packages landed
-
   local _python_version
-
   _python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-
   local _site_packages="$pkgdir/usr/lib/python$_python_version/site-packages"
-
   local _libs_dir="$_site_packages/pywhispercpp.libs"
 
-  local _binary_so="$_site_packages/_pywhispercpp.cpython-*-linux-gnu.so"
+  # Use the system NVIDIA driver, never a wheel-bundled libcuda.
+  find "$_site_packages" -name 'libcuda*.so*' \( -type f -o -type l \) ! -name 'libcudart*' -delete
 
+  local _binary_sos=("$_site_packages"/_pywhispercpp.cpython-*-linux-gnu.so)
+  [[ -f "${_binary_sos[0]}" ]] || {
+    error "pywhispercpp extension not found"
+    return 1
+  }
 
-
-  # 1) Remove bundled libcuda*.so* (we must use system libcuda.so.1)
-
-  if [ -d "$_libs_dir" ]; then
-
-    find "$_libs_dir" -name "libcuda*.so*" -type f ! -name "libcudart*" -delete 2>/dev/null || true
-
-    find "$_site_packages" -maxdepth 1 -name "libcuda*.so*" -type f ! -name "libcudart*" -delete 2>/dev/null || true
-
+  local _elfs=("${_binary_sos[@]}")
+  if [[ -d "$_libs_dir" ]]; then
+    while IFS= read -r -d '' f; do
+      _elfs+=("$f")
+    done < <(find "$_libs_dir" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
   fi
 
-
-
-  # 2) Fix any DT_NEEDED entries that still reference private libcuda-*.so
-
-  local f needed
-
-  for f in $_binary_so "$_libs_dir"/*.so*; do
-
-    [ -f "$f" ] || continue
-
-    for needed in $(patchelf --print-needed "$f" 2>/dev/null || true); do
-
+  local f needed needed_list
+  for f in "${_elfs[@]}"; do
+    if ! needed_list=$(patchelf --print-needed "$f"); then
+      error "cannot inspect ELF dependencies: $f"
+      return 1
+    fi
+    for needed in $needed_list; do
       case "$needed" in
-
-        libcuda-*.so* )
-
-          echo "Patching $f: replace-needed $needed -> libcuda.so.1"
-
-          patchelf --replace-needed "$needed" "libcuda.so.1" "$f" 2>/dev/null || true
-
+        libcuda-*.so*)
+          patchelf --replace-needed "$needed" libcuda.so.1 "$f" || return 1
           ;;
-
       esac
-
     done
 
-  done
-
-
-
-  # 3) Ensure RPATH includes /usr/lib (optional but harmless)
-
-  for f in $_binary_so; do
-
-    [ -f "$f" ] || continue
-
-    local _current_rpath
-
-    _current_rpath=$(patchelf --print-rpath "$f" 2>/dev/null || echo "")
-
-    if [ -n "$_current_rpath" ]; then
-
-      if [[ "$_current_rpath" != *"/usr/lib"* ]]; then
-
-        patchelf --set-rpath "$_current_rpath:/usr/lib" "$f" 2>/dev/null || true
-
-      fi
-
-    else
-
-      patchelf --set-rpath "/usr/lib" "$f" 2>/dev/null || true
-
+    if ! needed_list=$(patchelf --print-needed "$f"); then
+      error "cannot validate ELF dependencies: $f"
+      return 1
     fi
-
+    case "$needed_list" in
+      *libcuda-*.so*)
+        error "private libcuda dependency remains: $f"
+        return 1
+        ;;
+    esac
   done
 
+  local bundled_driver
+  bundled_driver=$(find "$_site_packages" -name 'libcuda*.so*' \( -type f -o -type l \) ! -name 'libcudart*' -print -quit) || return 1
+  if [[ -n "$bundled_driver" ]]; then
+    error "bundled libcuda remains in package: $bundled_driver"
+    return 1
+  fi
 }

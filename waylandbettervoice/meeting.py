@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import threading
 import time
 import wave
@@ -158,8 +159,8 @@ class _Meeting:
         self.settings = settings
         self.on_state = on_state
         self.started = time.monotonic()
-        self.directory = Path(config.MEETING_DIR) / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.directory.mkdir(parents=True, exist_ok=False)
+        self.directory = Path(config.MEETING_DIR) / datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        self.directory.mkdir(parents=True, exist_ok=False, mode=0o700)
         self.segments: list[dict[str, Any]] = []
         self.stop_event = threading.Event()
         self.diarizer = _Diarizer(settings)
@@ -171,26 +172,34 @@ class _Meeting:
         }
         self.raw = {source: (self.directory / f".{source}.raw").open("wb") for source in self.captures}
         self.threads: list[threading.Thread] = []
+        self.worker: threading.Thread | None = None
         self.last_state = 0.0
+        # ponytail: bounded queue drops transcription chunks when STT lags; raw files and mix keep the full audio.
+        self._queue: "queue.Queue[Any]" = queue.Queue(maxsize=8)
+        self._dropped = 0
+        self._done_lock = threading.Lock()
+        self._done_count = 0
+        self._finalize_lock = threading.Lock()
+        self._finalized = False
 
     def start(self) -> None:
+        worker = threading.Thread(target=self._worker_loop, daemon=True, name="wbv-meeting-stt")
+        worker.start()
+        self.worker = worker
         for capture in self.captures.values():
             capture.start()
+        self._state(0.0, force=True)
         for source in self.captures:
             thread = threading.Thread(target=self._capture, args=(source,), daemon=True, name=f"wbv-meeting-{source}")
             self.threads.append(thread)
             thread.start()
-        self._state(0.0, force=True)
 
     def _state(self, level: float, force: bool = False) -> None:
         now = time.monotonic()
         if force or now - self.last_state >= 0.1:
             self.last_state = now
             fields = {"mode": "meeting", "level": max(0.0, min(1.0, float(level))), "meeting": self.info()}
-            try:
-                self.on_state(**fields)
-            except TypeError:  # Compatibility with early daemon callback accepting one dict.
-                self.on_state(fields)
+            self.on_state(fields)
 
     def _capture(self, source: str) -> None:
         window = max(1, int(_value(self.settings, "meeting_chunk_seconds", 12))) * _RATE * _SAMPLE_BYTES
@@ -203,35 +212,65 @@ class _Meeting:
                 if time.monotonic() - self.started >= max_seconds:
                     _LOG.warning("meeting maximum duration reached")
                     self.stop_event.set()
-                    for active_capture in self.captures.values():
-                        active_capture.stop()
                     break
                 chunk = capture.read_chunk()
                 if not chunk:
                     if not self.stop_event.is_set():
                         _LOG.warning("meeting %s capture ended", source)
                         self.stop_event.set()
-                        for active_capture in self.captures.values():
-                            active_capture.stop()
                     break
                 if isinstance(chunk, np.ndarray):
                     chunk = chunk.astype("<i2", copy=False).tobytes()
                 else:
                     chunk = bytes(chunk)
                 self.raw[source].write(chunk)
-                self.raw[source].flush()
-                buffered.extend(chunk)
                 self._state(audio.rms_level(chunk))
+                buffered.extend(chunk)
                 while len(buffered) >= window:
                     pcm = bytes(buffered[:window])
                     del buffered[:window]
-                    self._process(source, sample_offset / (_RATE * _SAMPLE_BYTES), pcm)
+                    self._push(source, sample_offset / (_RATE * _SAMPLE_BYTES), pcm)
                     sample_offset += len(pcm)
-            if buffered:
-                self._process(source, sample_offset / (_RATE * _SAMPLE_BYTES), bytes(buffered))
         except Exception as error:
             if not self.stop_event.is_set():
                 _LOG.warning("meeting %s capture stopped: %s", source, error)
+            self.stop_event.set()
+        finally:
+            for active_capture in self.captures.values():
+                try:
+                    active_capture.stop()
+                except Exception:
+                    pass
+            if buffered:
+                self._push(source, sample_offset / (_RATE * _SAMPLE_BYTES), bytes(buffered))
+            self._capture_done()
+
+    def _push(self, source: str, start: float, pcm: bytes) -> None:
+        """Queue one chunk for the transcription worker without blocking capture."""
+        try:
+            self._queue.put_nowait((source, start, pcm))
+        except queue.Full:
+            self._dropped += 1
+            if self._dropped == 1 or self._dropped % 50 == 0:
+                _LOG.warning("meeting transcription queue full; dropped %d chunk(s)", self._dropped)
+
+    def _capture_done(self) -> None:
+        with self._done_lock:
+            self._done_count += 1
+            last = self._done_count == len(self.captures)
+        if last:
+            self._finalize()
+
+    def _worker_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            source, start, pcm = item
+            try:
+                self._process(source, start, pcm)
+            except Exception as error:
+                _LOG.warning("meeting segment processing failed: %s", error)
 
     def _process(self, source: str, start: float, pcm: bytes) -> None:
         # ponytail: RMS gate can discard very quiet speech; expose threshold only after users report it.
@@ -288,14 +327,54 @@ class _Meeting:
                 capture.stop()
             except Exception as error:
                 _LOG.warning("meeting capture stop failed: %s", error)
+        current = threading.current_thread()
         for thread in self.threads:
-            thread.join()
-        for raw in self.raw.values():
-            raw.close()
-        with _lock:
-            self._write_transcript()
-        self._write_mix()
+            if thread is not current:  # a capture thread must never join itself
+                thread.join()
+        self._finalize()
         return self.info(active=False)
+
+    def _finalize(self) -> None:
+        """Finalize exactly once across user stop, EOF, max duration, and capture errors.
+
+        Whichever path arrives first (user stop or the last capture thread) does the
+        work; the lock plus flag makes every other path a no-op. No thread joins
+        itself: capture threads exit on their own, and the worker is separate.
+        """
+        global _session
+        with self._finalize_lock:
+            if self._finalized:
+                return
+            self._finalized = True
+            self._queue.put(None)
+            if self.worker is not None:
+                self.worker.join()
+            for raw in self.raw.values():
+                try:
+                    raw.close()
+                except OSError:
+                    pass
+            finalization_error: Exception | None = None
+            try:
+                with _lock:
+                    self._write_transcript()
+            except Exception as error:  # keep raw audio recoverable on any writer failure
+                finalization_error = error
+                _LOG.warning("meeting transcript write failed: %s", error)
+            try:
+                self._write_mix()
+            except Exception as error:  # malformed/truncated PCM may raise ValueError
+                finalization_error = finalization_error or error
+                _LOG.warning("meeting mix write failed: %s", error)
+            with _lock:
+                if _session is self:
+                    _session = None
+            self.on_state({
+                "mode": "error" if finalization_error else "idle",
+                "level": 0.0,
+                "error": f"meeting finalization failed: {finalization_error}" if finalization_error else None,
+                "meeting": self.info(active=False),
+            })
 
     def info(self, active: bool = True) -> dict[str, Any]:
         return {
