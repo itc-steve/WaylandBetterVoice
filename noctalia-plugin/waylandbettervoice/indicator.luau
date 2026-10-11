@@ -5,7 +5,7 @@ local phase = 0
 function update()
     if not opened then return end
     local status = wbv.status()
-    if not wbv.active(status) then panel.close(); return end
+    if not noctalia.getConfig("show_indicator") or not wbv.active(status) then panel.close(); return end
     panel.setNeedsFrameTick(status.mode ~= "meeting")
     panel.render(wbv.indicator(status, 16, phase))
 end

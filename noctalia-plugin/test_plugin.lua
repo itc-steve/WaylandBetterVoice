@@ -4,12 +4,16 @@ local root = 'noctalia-plugin/waylandbettervoice/'
 local values, queued, notices = {}, {}, {}
 local fixture
 local accept = true
+local showIndicator = true
 noctalia = {
     state = { get = function(k) return values[k] end,
         set = function(k, v) values[k] = v end,
         watch = function() end },
     json = { decode = function() return fixture end },
-    getConfig = function() return true end,
+    getConfig = function(key)
+        assert(key == 'show_indicator')
+        return showIndicator
+    end,
     setUpdateInterval = function() end,
     runAsync = function(argv, cb)
         if not accept then return false end
@@ -109,9 +113,52 @@ values.command_error = ''
 values.status = {mode = 'error', error = 'Fixture error'}
 update()
 assert(tree.children[6].props.text == 'Fixture error')
+local renders, closes, frameRequests = 0, 0, 0
+local frameTicks, secondTicks = false, false
+panel = {
+    render = function(t) tree = t; renders = renders + 1 end,
+    close = function()
+        closes = closes + 1
+        frameTicks, secondTicks = false, false -- host stops ticks on close
+        onClose()
+    end,
+    setWantsSecondTicks = function(enabled) secondTicks = enabled end,
+    setNeedsFrameTick = function(enabled)
+        frameRequests = frameRequests + 1
+        frameTicks = enabled
+    end,
+}
+values.status = {mode = 'listening', level = 0.1}
 dofile(root .. 'indicator.luau')
 onOpen()
-values.status = s
+assert(closes == 0 and renders == 1 and tree.kind == 'row')
+assert(frameTicks and secondTicks)
+onFrameTick(16)
+assert(renders == 2 and frameRequests == 2)
+
+showIndicator = false
+update() -- active recording must close locally when disabled
+assert(closes == 1 and renders == 2 and frameRequests == 2)
+assert(not frameTicks and not secondTicks)
 update()
-assert(tree.kind == 'row')
-print('plugin self-check: passed (normalization, privacy, commands, failures, polling, recovery, UI)')
+onFrameTick(16) -- even a late queued callback must not render or request ticks
+assert(closes == 1 and renders == 2 and frameRequests == 2)
+
+-- Config edits rebuild panel runtimes; disabled onOpen must close before rendering.
+dofile(root .. 'indicator.luau')
+onOpen()
+assert(closes == 2 and renders == 2 and frameRequests == 2)
+assert(not frameTicks and not secondTicks)
+showIndicator = true
+onOpen()
+assert(closes == 2 and renders == 3 and frameTicks and secondTicks)
+values.status = s -- meeting stays visible without frame animation
+update()
+assert(renders == 4 and not frameTicks and secondTicks)
+values.status = {mode = 'idle'}
+update()
+assert(closes == 3 and renders == 4 and not frameTicks and not secondTicks)
+update()
+onFrameTick(16)
+assert(closes == 3 and renders == 4 and frameRequests == 4)
+print('plugin self-check: passed (normalization, privacy, commands, failures, polling, recovery, UI, indicator visibility)')
