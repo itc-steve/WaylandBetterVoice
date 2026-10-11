@@ -15,7 +15,7 @@ esac
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 plugin_source=/usr/share/waylandbettervoice/noctalia-plugin
-plugin_dest="${HOME}/.config/noctalia/plugins/waylandbettervoice"
+plugin_dest="${XDG_DATA_HOME:-${HOME}/.local/share}/noctalia/plugins/waylandbettervoice"
 model_dir="${HOME}/.local/share/waylandbettervoice/models"
 niri_source=/usr/share/waylandbettervoice/niri-keybinds.kdl
 niri_snippet="${HOME}/.config/niri/cfg/waylandbettervoice.kdl"
@@ -27,7 +27,8 @@ announce() {
 if "${check}"; then
   announce "Would build package: (cd ${script_dir} && makepkg --cleanbuild --clean --force)"
   announce "Would install resulting waylandbettervoice package with: sudo pacman -U <package>"
-  announce "Would create ${HOME}/.config/noctalia/plugins and copy ${plugin_source} to ${plugin_dest}"
+  announce "Would create ${plugin_dest} and copy ${plugin_source} (Noctalia v5)"
+  announce "Would not enable the plugin or edit Noctalia config"
   announce "Would create ${model_dir}; if empty, run: wbv model download large-v3"
   announce "Would create ${HOME}/.config/niri/cfg and copy ${niri_source} to ${niri_snippet} if absent"
   printf '%s\n' "Would not enable service or edit niri config."
@@ -60,21 +61,14 @@ elif [[ -e ${plugin_dest} && ! -d ${plugin_dest} ]]; then
   echo "Refusing to replace existing plugin path: ${plugin_dest}" >&2
   exit 1
 fi
-settings_backup=""
-if [[ -f ${plugin_dest}/settings.json ]]; then
-  settings_backup=$(mktemp)
-  cp -- "${plugin_dest}/settings.json" "${settings_backup}"
-  trap 'rm -f -- "${settings_backup}"' EXIT
+if [[ -e ${plugin_dest}/manifest.json || -e ${plugin_dest}/Main.qml ]]; then
+  echo "Archive the old v4 plugin at ${plugin_dest} before installing v5." >&2
+  exit 1
 fi
-announce "Creating plugin directory: ${HOME}/.config/noctalia/plugins"
+announce "Creating Noctalia v5 plugin directory: ${plugin_dest}"
 mkdir -p "${plugin_dest}"
 announce "Copying plugin: ${plugin_source} -> ${plugin_dest}"
 cp -r -- "${plugin_source}/." "${plugin_dest}/"
-if [[ -n ${settings_backup} ]]; then
-  install -m600 "${settings_backup}" "${plugin_dest}/settings.json"
-else
-  chmod 600 "${plugin_dest}/settings.json"
-fi
 
 announce "Creating model directory: ${model_dir}"
 mkdir -p "${model_dir}"
@@ -98,4 +92,8 @@ Next steps (not performed):
   systemctl --user enable --now waylandbettervoice.service
   Add: include "./cfg/waylandbettervoice.kdl"
   to ~/.config/niri/config.kdl, then reload niri.
+  noctalia msg config-reload
+  noctalia msg plugins enable itc-steve/waylandbettervoice
+  Add bar widget type: itc-steve/waylandbettervoice:mic
+  Archive any old ~/.config/noctalia/plugins/waylandbettervoice v4 copy separately.
 EOF

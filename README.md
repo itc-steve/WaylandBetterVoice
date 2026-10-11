@@ -34,7 +34,7 @@ tested on, a single very specific setup:
 | **GPU** | NVIDIA **RTX PRO 6000 Blackwell** — compute capability **12.0 (`sm_120`)** |
 | **OS** | CachyOS (Arch Linux), Python 3.14, system packages only — no venv, no pip |
 | **Compositor** | niri 26.04, strict Wayland (no X11 fallback) |
-| **Shell** | Noctalia 4.7.7 / quickshell 0.0.12 — required only for the overlay |
+| **Shell** | Noctalia v5.2.1 (plugin API 30+) — optional bar/panel/recording indicator |
 | **Audio** | PipeWire 1.6.8 |
 | **Injection** | `wtype` for native apps; `ydotool` + `uinput` if you dictate into Electron apps |
 
@@ -77,14 +77,20 @@ systemctl --user enable --now waylandbettervoice.service
 #      include "./cfg/waylandbettervoice.kdl"
 niri validate
 
-# 4. overlay (optional, needs Noctalia) — user-owned copy, not a symlink
-mkdir -p ~/.config/noctalia/plugins/waylandbettervoice
-cp -r /usr/share/waylandbettervoice/noctalia-plugin/. \
-      ~/.config/noctalia/plugins/waylandbettervoice/
+# 4. Noctalia v5 plugin (optional) — user-owned copy, not a symlink
+plugin_dir="${XDG_DATA_HOME:-$HOME/.local/share}/noctalia/plugins/waylandbettervoice"
+mkdir -p "$plugin_dir"
+cp -r /usr/share/waylandbettervoice/noctalia-plugin/. "$plugin_dir/"
+noctalia msg config-reload
+noctalia msg plugins enable itc-steve/waylandbettervoice
 ```
 
-Enable the plugin in Noctalia's settings, then add the **WaylandBetterVoice** widget to
-your bar.
+Add bar widget type **`itc-steve/waylandbettervoice:mic`** in Noctalia's bar editor.
+The installer already copies the plugin but does not enable it. For repository/path-source
+installation and verification, see [plugin README](noctalia-plugin/waylandbettervoice/README.md).
+The v4 QML plugin is removed; history/backups retain it. Archive any old user-installed
+v4 directory separately; v4 `settings.json` is not used by v5. Python app, build setup,
+CLI commands, models and niri keybinds remain unchanged.
 
 The installer is idempotent and refuses to run as root. Models are downloaded on demand
 into `~/.local/share/waylandbettervoice/models/` — nothing is fetched without you asking.
@@ -99,8 +105,8 @@ If you dictate into Electron apps (Termius, VS Code, Discord), also set up `ydot
 | `Super+Space` | Start / stop listening. While listening, each pause types a sentence. |
 | `Super+Alt+Space` | Start / stop recording a meeting. |
 
-Everything is also available on the CLI and from the bar widget. Right-click the mic
-icon for the app panel; middle-click for Noctalia settings (native vs Electron typing).
+Everything is also available on the CLI and from the bar widget. Left-click toggles
+dictation; right- or middle-click opens the control panel, including typing method controls.
 
 ```bash
 wbv dictate toggle      # or start / stop / cancel
@@ -174,16 +180,24 @@ systemctl --user restart waylandbettervoice
 Set `meeting_diarization` to `false` to turn it off, or `meeting_speakers` to a known
 participant count when auto-detection splits or merges people.
 
-## Overlay
+## Noctalia v5 recording indicator
 
-While listening, a small capsule appears at the top of the screen with three pulsing
-dots. It changes colour for listening, dictating, and transcribing, and the dots respond
-to your mic level.
+A persistent, non-keyboard-focus panel appears at the top centre while recording.
+Its pulsing orb changes colour for listening, dictating and transcribing, and responds
+to sampled mic level. Meetings show a calm red dot and elapsed timer instead. The bar
+also shows recording state and the meeting timer. Plugin settings can disable the
+floating indicator; Noctalia owns panel position/layer and bar placement/scale.
 
-Meetings deliberately do **not** use that capsule. They show a dim, near-static pill with
-a small red dot and a timer, because meetings usually mean a shared screen and a bright
-animation over your slides is the last thing you want. Position, scale, and both indicators
-are configurable in the plugin settings.
+Status is polled through `wbv status --json` once per second, without overlapping calls,
+and recovers automatically after daemon restarts. No transcripts or meeting paths are
+published to shared plugin state, rendered or logged. Commands report launch/nonzero/
+timeout errors and share a busy gate; models are never downloaded automatically.
+
+V5 does not reproduce the old QML three-orb shader, arbitrary margin/scale settings,
+per-monitor overlay windows, transcript preview/copy or live keybind scraping. The
+floating surface is host-sized (240×56 logical pixels), on the output selected by
+Noctalia. Mic levels update at 1 Hz; pulse animation uses frame ticks. Disabling the
+plugin never stops the daemon or recording. CLI/niri controls remain independent.
 
 ## Privacy
 
@@ -203,7 +217,7 @@ Super+Space ──▶ wbv CLI ──▶ unix socket ──▶ daemon (model resi
                                                │
                               whisper.cpp ──▶ wtype/ydotool ──▶ focused window
                                                │
-                                    state.json ──▶ Noctalia overlay
+                               wbv status --json ──▶ Noctalia v5 plugin
 ```
 
 Deliberate choices:
@@ -284,8 +298,8 @@ The Arch package ships both the `ydotool.service` user unit and the udev rule th
 needed. Confirm you are in the `input` group with `id -nG | grep input`; if you are not,
 run `sudo usermod -aG input "$USER"` and log out and back in.
 
-Then middle-click the bar mic, enable **Electron app compatibility**, and save. The mode
-changes immediately and persists. To switch without the bar widget, run:
+Then right- or middle-click the bar mic and choose **Electron · ydotool**. The mode
+changes immediately and persists through `wbv inject`. To switch without the bar widget, run:
 
 ```bash
 wbv inject ydotool   # Electron-compatible
@@ -339,15 +353,19 @@ were just added to `input`, log out and back in.
 </details>
 
 <details>
-<summary><b>The overlay never appears or never updates</b></summary>
+<summary><b>The recording indicator never appears or never updates</b></summary>
 
-The plugin reads `state.json` from `$XDG_RUNTIME_DIR`, which is cleared on reboot.
-It carries a recovery timer for the case where the daemon starts after the shell, so
-this should self-heal within about a second. If it does not:
+The v5 plugin polls CLI status once per second. Confirm daemon reachability, plugin
+enablement and the `mic` widget placement. Check **Show recording orb and meeting timer**
+in plugin settings. Offline validation and shell discovery:
 
 ```bash
-qs -c noctalia-shell log | grep -i waylandbetter
+noctalia plugins lint noctalia-plugin/waylandbettervoice
+noctalia msg plugins list
+wbv status --json
 ```
+
+Status output can contain dictated text; do not share it without redaction.
 </details>
 
 <details>

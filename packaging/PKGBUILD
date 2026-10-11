@@ -24,7 +24,7 @@ makedepends=(
 )
 optdepends=(
   'python-sherpa-onnx: meeting speaker diarization'
-  'noctalia-shell: overlay plugin'
+  'noctalia: Noctalia v5 bar, panel and recording indicator plugin'
   'ydotool: inject_method=ydotool, needed to type into Electron apps (Termius, VS Code)'
 )
 install='wbv.install'
@@ -41,6 +41,12 @@ build() {
 check() {
   cd "${_repo_root}"
   python -m waylandbettervoice.selftest
+  if command -v lua >/dev/null; then
+    lua noctalia-plugin/test_plugin.lua
+  fi
+  if command -v noctalia >/dev/null; then
+    noctalia plugins lint noctalia-plugin/waylandbettervoice
+  fi
 }
 
 package() {

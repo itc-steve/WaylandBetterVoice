@@ -1,0 +1,44 @@
+id = "itc-steve/waylandbettervoice"
+name = "WaylandBetterVoice"
+version = "2.0.0"
+plugin_api = 30
+author = "itc-steve"
+license = "MIT"
+icon = "microphone"
+description = "Offline dictation and meeting controls for the wbv daemon."
+dependencies = ["wbv"]
+
+[[setting]]
+key = "show_indicator"
+type = "bool"
+label_key = "settings.show_indicator"
+default = true
+
+[[widget]]
+id = "mic"
+entry = "widget.luau"
+[widget.actions]
+middle = "none"
+
+[[service]]
+id = "status"
+entry = "service.luau"
+
+[[panel]]
+id = "panel"
+entry = "panel.luau"
+width = 560
+height = 440
+placement = "attached"
+
+[[panel]]
+id = "indicator"
+entry = "indicator.luau"
+width = 240
+height = 56
+position = "top_center"
+open_near_click = false
+layer = "overlay"
+keyboard_focus = "none"
+dismiss_on_outside_click = false
+persistent = true
