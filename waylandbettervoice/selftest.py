@@ -573,6 +573,7 @@ def test_injection_never_types_control_keys() -> None:
                     assert argv[-2:] == ["--", expected], (method, repr(text), argv)
                     if method == "ydotool":
                         assert "--escape=0" in argv, "ydotool must not decode literal \\n as Enter"
+                        assert "--key-delay=1" in argv and "--key-hold=1" in argv
                     assert run.call_count == 1
 
     # ydotool's byte-indexed ASCII map cannot safely type UTF-8. Preserve it via clipboard.

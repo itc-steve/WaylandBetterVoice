@@ -40,7 +40,7 @@ def type_text(text: str, trailing_space: bool = True, method: str = "wtype") -> 
     # "--" protects leading dashes; ydotool otherwise interprets literal \\n as Enter.
     argv = {
         "wtype": lambda exe: [exe, "--", s],
-        "ydotool": lambda exe: [exe, "type", "--escape=0", "--", s],
+        "ydotool": lambda exe: [exe, "type", "--key-delay=1", "--key-hold=1", "--escape=0", "--", s],
     }.get(method)
 
     if argv:

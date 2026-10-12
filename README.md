@@ -286,6 +286,9 @@ Brave: a wrong keycode can act like Enter and submit a message even without a ne
 in the dictation. Use `wbv inject ydotool` for those too; removing line breaks alone
 does not fix a misread keymap.
 
+`ydotool` uses 1 ms key delays and holds instead of its 20 ms defaults for faster
+insertion. If an app drops characters, these timings may need increasing.
+
 To use `ydotool`:
 
 ```bash
